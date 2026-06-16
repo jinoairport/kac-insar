@@ -3,9 +3,13 @@
 경상도권 5개 공항(PUS/TAE/HIN/USN/KPO)을 80m 해상도로 일괄 처리
 실행:  python run_gyeongnam_80m.py
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# 스크립트 위치 기준으로 작업 디렉토리 고정
+os.chdir(Path(__file__).parent)
 
 # AIRPORTS 리스트에서의 1-indexed 번호
 # 3=PUS, 4=TAE, 8=HIN, 9=USN, 10=KPO
