@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>한국공항공사 지반침하 모니터링</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', sans-serif; background: #0f1923; color: #e0e0e0; height: 100dvh; display: flex; flex-direction: column; }
+
+  #header {
+    background: #1a2636; padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #2a3a50; flex-shrink: 0;
+  }
+  #header h1 { font-size: 15px; font-weight: 700; color: #fff; }
+  #header .sub { font-size: 11px; color: #7a9bb5; margin-top: 2px; }
+  #updated { font-size: 11px; color: #7a9bb5; text-align: right; }
+
+  /* 공항 탭 */
+  #airport-bar {
+    background: #1a2636; padding: 0 16px;
+    display: flex; gap: 6px; overflow-x: auto;
+    border-bottom: 1px solid #2a3a50; flex-shrink: 0; scrollbar-width: none;
+  }
+  #airport-bar::-webkit-scrollbar { display: none; }
+  .ap-btn {
+    padding: 7px 12px; font-size: 12px; border: none; border-radius: 4px 4px 0 0;
+    cursor: pointer; white-space: nowrap; background: transparent; color: #7a9bb5;
+    border-bottom: 2px solid transparent;
+  }
+  .ap-btn.active { color: #4fc3f7; border-bottom-color: #4fc3f7; font-weight: 700; }
+
+  /* 기간 선택 바 */
+  #period-bar {
+    background: #131f2e; padding: 8px 16px 10px;
+    border-bottom: 1px solid #2a3a50; flex-shrink: 0;
+  }
+  #period-bar .pb-top {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 6px;
+  }
+  #period-bar .pb-top .label { font-size: 11px; color: #7a9bb5; }
+  #period-bar .pb-top .label span { color: #4a6070; }
+  #period-label { font-size: 12px; color: #4fc3f7; font-weight: 700; }
+  #reset-btn {
+    font-size: 11px; color: #7a9bb5; background: none; border: 1px solid #2a3a50;
+    border-radius: 10px; padding: 2px 8px; cursor: pointer;
+  }
+  #reset-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
+
+  /* 슬라이더 트랙 */
+  #slider-wrap { position: relative; height: 28px; padding: 0 8px; }
+  #slider-track {
+    position: absolute; top: 50%; left: 8px; right: 8px;
+    height: 4px; background: #2a3a50; border-radius: 2px; transform: translateY(-50%);
+  }
+  #slider-fill {
+    position: absolute; top: 0; height: 100%;
+    background: #4fc3f7; border-radius: 2px;
+  }
+  .slider-handle {
+    position: absolute; top: 50%; width: 16px; height: 16px;
+    background: #4fc3f7; border-radius: 50%; transform: translate(-50%, -50%);
+    cursor: grab; border: 2px solid #fff; box-shadow: 0 0 4px rgba(0,0,0,0.5);
+    z-index: 2; touch-action: none;
+  }
+  .slider-handle:active { cursor: grabbing; transform: translate(-50%,-50%) scale(1.2); }
+  .slider-tick {
+    position: absolute; top: 18px; font-size: 9px; color: #4a6070;
+    transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  }
+  #min-warn { font-size: 10px; color: #ff9800; text-align: center; margin-top: 2px; display: none; }
+
+  /* 요약 바 */
+  #summary {
+    background: #1a2636; padding: 8px 16px;
+    display: flex; gap: 8px; flex-wrap: wrap;
+    border-bottom: 1px solid #2a3a50; flex-shrink: 0;
+  }
+  .stat { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.safe   { background: #4caf50; }
+  .dot.watch  { background: #ffeb3b; }
+  .dot.alert  { background: #ff9800; }
+  .dot.danger { background: #f44336; }
+
+  #main { flex: 1; display: flex; overflow: hidden; }
+  #map  { flex: 1; position: relative; }
+
+  #panel {
+    width: 300px; background: #1a2636; padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    border-left: 1px solid #2a3a50; overflow-y: auto;
+  }
+  #panel h3 { font-size: 13px; color: #4fc3f7; font-weight: 700; }
+  #panel .info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #2a3a50; }
+  #panel .info-row span:last-child { font-weight: 700; }
+  #panel .placeholder { color: #4a6070; font-size: 12px; text-align: center; margin-top: 20px; line-height: 1.6; }
+  #chart-wrap { position: relative; height: 180px; }
+
+  #mobile-panel {
+    display: none; background: #1a2636;
+    border-top: 1px solid #2a3a50; padding: 12px 16px;
+    max-height: 220px; overflow-y: auto; flex-shrink: 0;
+  }
+
+  #layer-btn {
+    position: absolute; top: 10px; right: 10px; z-index: 1000;
+    background: #1a2636; color: #e0e0e0; border: 1px solid #2a3a50;
+    padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  #download-btn {
+    position: absolute; top: 46px; right: 10px; z-index: 1000;
+    background: #1a2636; color: #e0e0e0; border: 1px solid #2a3a50;
+    padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  #download-btn:hover { background: #243446; border-color: #4fc3f7; color: #4fc3f7; }
+  #download-btn:disabled { opacity: 0.5; cursor: wait; }
+
+  #legend {
+    position: absolute; bottom: 24px; left: 10px; z-index: 1000;
+    background: rgba(26,38,54,0.92); padding: 10px 12px; border-radius: 6px;
+    font-size: 11px; line-height: 1.8; border: 1px solid #2a3a50;
+  }
+  #legend .leg-row { display: flex; align-items: center; gap: 6px; }
+  #legend .leg-box { width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0; }
+
+  #demo-banner {
+    background: #2a3a10; border-bottom: 1px solid #4a6020;
+    padding: 5px 16px; font-size: 11px; color: #b8d070; text-align: center; flex-shrink: 0;
+  }
+
+  @media (max-width: 700px) {
+    #panel { display: none; }
+    #mobile-panel { display: block; }
+    #header h1 { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="demo-banner">시안 · 더미 데이터 표시 중 — 실측 데이터 적용 시 자동 전환됩니다</div>
+
+<div id="header">
+  <div>
+    <div id="header-title">한국공항공사 지반침하 모니터링</div>
+    <div class="sub">Sentinel-1 InSAR 기반 연간 침하속도</div>
+  </div>
+  <div id="updated">갱신: —</div>
+</div>
+
+<div id="airport-bar"></div>
+
+<div id="period-bar">
+  <div class="pb-top">
+    <span class="label">분석 기간 <span>(최소 6개월)</span></span>
+    <span id="period-label">전체 기간</span>
+    <button id="reset-btn" onclick="resetPeriod()">전체 초기화</button>
+  </div>
+  <div id="slider-wrap">
+    <div id="slider-track">
+      <div id="slider-fill"></div>
+    </div>
+    <div class="slider-handle" id="handle-l"></div>
+    <div class="slider-handle" id="handle-r"></div>
+  </div>
+  <div id="min-warn">⚠ 최소 6개월 이상 선택하세요</div>
+</div>
+
+<div id="summary">
+  <div class="stat"><div class="dot safe"></div><span id="cnt-safe">—</span> 안정</div>
+  <div class="stat"><div class="dot watch"></div><span id="cnt-watch">—</span> 주의</div>
+  <div class="stat"><div class="dot alert"></div><span id="cnt-alert">—</span> 경계</div>
+  <div class="stat"><div class="dot danger"></div><span id="cnt-danger">—</span> 위험</div>
+  <div class="stat" style="margin-left:auto; color:#7a9bb5; font-size:11px;" id="total-cnt"></div>
+</div>
+
+<div id="main">
+  <div id="map">
+    <button id="layer-btn" onclick="toggleLayer()">위성영상</button>
+    <button id="download-btn" onclick="downloadMap()">화면저장</button>
+    <div id="legend">
+      <div style="font-weight:700; margin-bottom:4px; color:#fff;">침하속도 (mm/yr)</div>
+      <div class="leg-row"><div class="leg-box" style="background:#4caf50"></div> 0 ~ -5 (안정)</div>
+      <div class="leg-row"><div class="leg-box" style="background:#ffeb3b"></div> -5 ~ -10 (주의)</div>
+      <div class="leg-row"><div class="leg-box" style="background:#ff9800"></div> -10 ~ -20 (경계)</div>
+      <div class="leg-row"><div class="leg-box" style="background:#f44336"></div> -20 이하 (위험)</div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <h3 id="panel-title">지점 선택</h3>
+    <div id="panel-info">
+      <div class="placeholder">지도에서 격자를 클릭하면<br>해당 지점의 침하 정보와<br>시계열 그래프가 표시됩니다.</div>
+    </div>
+    <div id="chart-wrap" style="display:none">
+      <canvas id="myChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="mobile-panel">
+  <div id="mobile-info" style="color:#4a6070; font-size:12px; text-align:center;">지도에서 격자를 클릭하세요.</div>
+  <div id="mobile-chart-wrap" style="display:none; position:relative; height:140px; margin-top:8px;">
+    <canvas id="myChartMobile"></canvas>
+  </div>
+</div>
+
+<script>
+const AIRPORTS = [
+  {name:"김포공항",     code:"GMP", lat:37.5583, lon:126.7906},
+  {name:"제주공항",     code:"CJU", lat:33.5113, lon:126.4930},
+  {name:"김해공항",     code:"PUS", lat:35.1795, lon:128.9381},
+  {name:"대구공항",     code:"TAE", lat:35.8971, lon:128.6586},
+  {name:"청주공항",     code:"CJJ", lat:36.7172, lon:127.4991},
+  {name:"광주공항",     code:"KWJ", lat:35.1264, lon:126.8088},
+  {name:"여수공항",     code:"RSU", lat:34.8423, lon:127.6169},
+  {name:"사천공항",     code:"HIN", lat:35.0883, lon:128.0703},
+  {name:"울산공항",     code:"USN", lat:35.5935, lon:129.3522},
+  {name:"포항경주공항", code:"KPO", lat:35.9879, lon:129.4199},
+  {name:"군산공항",     code:"KUV", lat:35.9038, lon:126.6159},
+  {name:"원주공항",     code:"WJU", lat:37.4381, lon:127.9596},
+  {name:"양양공항",     code:"YNY", lat:38.0613, lon:128.6693},
+  {name:"무안공항",     code:"MWX", lat:34.9914, lon:126.3828},
+];
+
+// ── 현재 선택된 기간 (null = 전체) ────────────────────────
+let currentPeriod = null;  // {startIdx, endIdx}
+let currentData   = null;
+let selectedCell  = null;
+let gridLayer     = null;
+let chartD = null, chartM = null;
+
+// ── 색상/등급 ──────────────────────────────────────────────
+function velColor(v) {
+  if (v > -5)  return '#4caf50';
+  if (v > -10) return '#ffeb3b';
+  if (v > -20) return '#ff9800';
+  return '#f44336';
+}
+function velLabel(v) {
+  if (v > -5)  return '안정';
+  if (v > -10) return '주의';
+  if (v > -20) return '경계';
+  return '위험';
+}
+
+// ── 선형회귀로 침하속도 계산 (mm/yr) ─────────────────────
+function calcVelocity(ts) {
+  const n = ts.length;
+  if (n < 2) return 0;
+  let sx=0, sy=0, sxy=0, sx2=0;
+  for (let i=0; i<n; i++) { sx+=i; sy+=ts[i]; sxy+=i*ts[i]; sx2+=i*i; }
+  const slope = (n*sxy - sx*sy) / (n*sx2 - sx*sx);
+  return slope * 12;  // 월→연 환산
+}
+
+// ── 기간 필터 적용해서 ts/dates 슬라이스 ─────────────────
+function sliceByPeriod(cell, allDates) {
+  if (!currentPeriod) return { dates: allDates, ts: cell.ts };
+  const { si, ei } = currentPeriod;
+  return { dates: allDates.slice(si, ei+1), ts: cell.ts.slice(si, ei+1) };
+}
+
+// ── 슬라이더 ───────────────────────────────────────────────
+let sliderDates = [];
+let siIdx = 0, eiIdx = 0;
+const MIN_SPAN = 6;  // 최소 6개월
+
+function buildSlider(dates) {
+  sliderDates = dates;
+  siIdx = 0;
+  eiIdx = dates.length - 1;
+  updateSliderUI();
+  removeSliderTicks();
+  addSliderTicks(dates);
+  initDrag();
+}
+
+function removeSliderTicks() {
+  document.querySelectorAll('.slider-tick').forEach(t => t.remove());
+}
+
+function addSliderTicks(dates) {
+  const wrap = document.getElementById('slider-wrap');
+  const n = dates.length;
+  // 1년(12개월) 단위로 눈금 표시
+  for (let i = 0; i < n; i += 12) {
+    const pct = i / (n - 1) * 100;
+    const tick = document.createElement('div');
+    tick.className = 'slider-tick';
+    tick.style.left = `calc(${pct}% + 8px)`;
+    tick.textContent = dates[i].substring(0, 4) + '년';
+    wrap.appendChild(tick);
+  }
+}
+
+function idxToPct(idx) {
+  return idx / (sliderDates.length - 1) * 100;
+}
+
+function pctToIdx(pct) {
+  return Math.round(pct / 100 * (sliderDates.length - 1));
+}
+
+function fmtDate(d) {
+  // "2024.06" → "2024년6월"
+  const [y, m] = d.split('.');
+  return `${y}년${parseInt(m,10)}월`;
+}
+
+function periodStr(si, ei) {
+  const isAll = (si === 0 && ei === sliderDates.length - 1);
+  const range = `${fmtDate(sliderDates[si])}~${fmtDate(sliderDates[ei])}`;
+  return isAll ? `전체기간(${range})` : range;
+}
+
+function updateSliderUI() {
+  const lPct = idxToPct(siIdx);
+  const rPct = idxToPct(eiIdx);
+  document.getElementById('handle-l').style.left = `calc(${lPct}% + 8px)`;
+  document.getElementById('handle-r').style.left = `calc(${rPct}% + 8px)`;
+  document.getElementById('slider-fill').style.left  = lPct + '%';
+  document.getElementById('slider-fill').style.width = (rPct - lPct) + '%';
+
+  document.getElementById('min-warn').style.display = 'none';
+  document.getElementById('period-label').style.color = '#4fc3f7';
+  document.getElementById('period-label').textContent = periodStr(siIdx, eiIdx);
+}
+
+function applyPeriod() {
+  const isAll = (siIdx === 0 && eiIdx === sliderDates.length - 1);
+  currentPeriod = isAll ? null : { si: siIdx, ei: eiIdx };
+  renderGrid(currentData);
+  if (selectedCell) showCell(selectedCell, currentData.dates);
+}
+
+function resetPeriod() {
+  siIdx = 0;
+  eiIdx = sliderDates.length - 1;
+  currentPeriod = null;
+  updateSliderUI();
+  renderGrid(currentData);
+  if (selectedCell) showCell(selectedCell, currentData.dates);
+}
+
+function initDrag() {
+  const wrap  = document.getElementById('slider-wrap');
+  const track = document.getElementById('slider-track');
+  let dragging = null;
+
+  function getTrackWidth() { return track.offsetWidth; }
+  function getPct(clientX) {
+    const rect = track.getBoundingClientRect();
+    return Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100));
+  }
+
+  function onMove(clientX) {
+    if (!dragging) return;
+    const idx = pctToIdx(getPct(clientX));
+    const maxIdx = sliderDates.length - 1;
+
+    if (dragging === 'l') {
+      if (idx <= eiIdx - MIN_SPAN) {
+        // 여유 있음 — 왼쪽 핸들만 이동
+        siIdx = Math.max(0, idx);
+      } else {
+        // 최소 간격 도달 — 전체 범위를 오른쪽으로 밀기
+        const span = eiIdx - siIdx;
+        siIdx = Math.min(idx, maxIdx - span);
+        eiIdx = siIdx + span;
+      }
+    } else {
+      if (idx >= siIdx + MIN_SPAN) {
+        // 여유 있음 — 오른쪽 핸들만 이동
+        eiIdx = Math.min(maxIdx, idx);
+      } else {
+        // 최소 간격 도달 — 전체 범위를 왼쪽으로 밀기
+        const span = eiIdx - siIdx;
+        eiIdx = Math.max(idx, span);
+        siIdx = eiIdx - span;
+      }
+    }
+    updateSliderUI();
+  }
+
+  function onEnd() {
+    if (!dragging) return;
+    dragging = null;
+    applyPeriod();
+  }
+
+  document.getElementById('handle-l').addEventListener('mousedown',  () => dragging = 'l');
+  document.getElementById('handle-r').addEventListener('mousedown',  () => dragging = 'r');
+  document.getElementById('handle-l').addEventListener('touchstart', (e) => { dragging='l'; e.preventDefault(); }, {passive:false});
+  document.getElementById('handle-r').addEventListener('touchstart', (e) => { dragging='r'; e.preventDefault(); }, {passive:false});
+
+  window.addEventListener('mousemove',  (e) => onMove(e.clientX));
+  window.addEventListener('touchmove',  (e) => onMove(e.touches[0].clientX), {passive:true});
+  window.addEventListener('mouseup',    onEnd);
+  window.addEventListener('touchend',   onEnd);
+}
+
+// ── 지도 초기화 ────────────────────────────────────────────
+const map = L.map('map', {zoomControl: true});
+const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OpenStreetMap'});
+const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution:'© Esri'});
+let useSat = false;
+osmLayer.addTo(map);
+
+// ── 화면 저장 ──────────────────────────────────────────────
+async function downloadMap() {
+  const btn = document.getElementById('download-btn');
+  btn.textContent = '저장 중…';
+  btn.disabled = true;
+  try {
+    // 저장 대상: 지도 + 우측 패널 포함 전체 영역
+    const target = document.getElementById('main');
+    const canvas = await html2canvas(target, {
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      backgroundColor: '#0f1923',
+      scale: window.devicePixelRatio || 1
+    });
+
+    // 상단 정보 바 추가
+    const activeBtn = document.querySelector('.ap-btn.active');
+    const apName = activeBtn ? activeBtn.textContent : '공항';
+    const periodLabel = document.getElementById('period-label').textContent;
+    const safeLabel   = document.getElementById('cnt-safe').textContent;
+    const watchLabel  = document.getElementById('cnt-watch').textContent;
+    const alertLabel  = document.getElementById('cnt-alert').textContent;
+    const dangerLabel = document.getElementById('cnt-danger').textContent;
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}.${String(today.getMonth()+1).padStart(2,'0')}.${String(today.getDate()).padStart(2,'0')}`;
+
+    const BAR = 40 * (window.devicePixelRatio || 1);
+    const out = document.createElement('canvas');
+    out.width  = canvas.width;
+    out.height = canvas.height + BAR;
+    const ctx = out.getContext('2d');
+
+    // 정보 바 배경
+    ctx.fillStyle = '#1a2636';
+    ctx.fillRect(0, 0, out.width, BAR);
+
+    // 하단 경계선
+    ctx.fillStyle = '#2a3a50';
+    ctx.fillRect(0, BAR - 1, out.width, 1);
+
+    const sc = window.devicePixelRatio || 1;
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${14*sc}px Malgun Gothic, sans-serif`;
+    ctx.fillText(`한국공항공사 지반침하 모니터링  ·  ${apName}  ·  ${periodLabel}`, 10*sc, 26*sc);
+
+    ctx.fillStyle = '#7a9bb5';
+    ctx.font = `${11*sc}px Malgun Gothic, sans-serif`;
+    const stats = `안정 ${safeLabel}  주의 ${watchLabel}  경계 ${alertLabel}  위험 ${dangerLabel}     출력: ${dateStr}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(stats, out.width - 10*sc, 26*sc);
+    ctx.textAlign = 'left';
+
+    // 캡처된 지도 붙이기
+    ctx.drawImage(canvas, 0, BAR);
+
+    const link = document.createElement('a');
+    link.download = `지반침하_${apName}_${dateStr}.png`;
+    link.href = out.toDataURL('image/png');
+    link.click();
+  } catch (e) {
+    console.error(e);
+    alert('화면 저장 중 오류가 발생했습니다.\n' + e.message);
+  } finally {
+    btn.textContent = '화면저장';
+    btn.disabled = false;
+  }
+}
+
+function toggleLayer() {
+  useSat = !useSat;
+  if (useSat) { map.removeLayer(osmLayer); satLayer.addTo(map); document.getElementById('layer-btn').textContent='일반지도'; }
+  else        { map.removeLayer(satLayer); osmLayer.addTo(map); document.getElementById('layer-btn').textContent='위성영상'; }
+}
+
+// ── 격자 렌더링 ────────────────────────────────────────────
+function renderGrid(data) {
+  currentData = data;
+  if (gridLayer) map.removeLayer(gridLayer);
+  const size = (data.cell_m || 80) * 0.000009;
+
+  let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
+  const layers = data.cells.map(cell => {
+    const { ts } = sliceByPeriod(cell, data.dates);
+    const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+    const col = velColor(v);
+
+    if (v > -5)       cntSafe++;
+    else if (v > -10) cntWatch++;
+    else if (v > -20) cntAlert++;
+    else              cntDanger++;
+
+    const rect = L.rectangle(
+      [[cell.lat - size/2, cell.lon - size/2],[cell.lat + size/2, cell.lon + size/2]],
+      {color:col, fillColor:col, fillOpacity:0.65, weight:0.5, opacity:0.4}
+    );
+    rect.on('click', () => { selectedCell = cell; showCell(cell, data.dates); });
+    return rect;
+  });
+
+  gridLayer = L.layerGroup(layers).addTo(map);
+  document.getElementById('cnt-safe').textContent   = cntSafe;
+  document.getElementById('cnt-watch').textContent  = cntWatch;
+  document.getElementById('cnt-alert').textContent  = cntAlert;
+  document.getElementById('cnt-danger').textContent = cntDanger;
+  document.getElementById('total-cnt').textContent  = `총 ${data.cells.length}개 격자`;
+  document.getElementById('updated').textContent    = `갱신: ${data.generated}`;
+}
+
+// ── 그래프 ─────────────────────────────────────────────────
+function drawChart(canvasId, dates, ts, vel) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const existing = canvasId==='myChart' ? chartD : chartM;
+  if (existing) existing.destroy();
+  const c = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [{
+        data: ts, borderColor: velColor(vel), backgroundColor: velColor(vel)+'33',
+        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false} },
+      scales: {
+        x: { ticks:{color:'#7a9bb5', font:{size:9}, maxTicksLimit:6}, grid:{color:'#2a3a50'} },
+        y: { ticks:{color:'#7a9bb5', font:{size:9}}, grid:{color:'#2a3a50'},
+             title:{display:true, text:'누적변위 (mm)', color:'#7a9bb5', font:{size:10}} }
+      }
+    }
+  });
+  if (canvasId==='myChart') chartD=c; else chartM=c;
+}
+
+function showCell(cell, allDates) {
+  const { dates, ts } = sliceByPeriod(cell, allDates);
+  const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+  const label = velLabel(v);
+  const color = velColor(v);
+  const si = currentPeriod ? currentPeriod.si : 0;
+  const ei = currentPeriod ? currentPeriod.ei : allDates.length - 1;
+  const pStr = periodStr(si, ei);
+  const isMobile = window.innerWidth <= 700;
+
+  if (!isMobile) {
+    document.getElementById('panel-title').textContent = `${label} 지점 상세`;
+    document.getElementById('panel-info').innerHTML = `
+      <div class="info-row"><span>분석 기간</span><span>${pStr}</span></div>
+      <div class="info-row"><span>침하속도</span><span style="color:${color}">${v} mm/yr</span></div>
+      <div class="info-row"><span>등급</span><span style="color:${color}">${label}</span></div>
+      <div class="info-row"><span>누적변위</span><span>${(ts[ts.length-1]-ts[0]).toFixed(1)} mm</span></div>
+      <div class="info-row"><span>위도</span><span>${cell.lat}</span></div>
+      <div class="info-row"><span>경도</span><span>${cell.lon}</span></div>
+    `;
+    document.getElementById('chart-wrap').style.display = 'block';
+    drawChart('myChart', dates, ts, v);
+  } else {
+    document.getElementById('mobile-info').innerHTML = `
+      <span style="color:${color}; font-weight:700;">${label} · ${v} mm/yr</span>
+      &nbsp;|&nbsp; ${pStr}
+    `;
+    document.getElementById('mobile-chart-wrap').style.display = 'block';
+    drawChart('myChartMobile', dates, ts, v);
+  }
+}
+
+// ── 더미 데이터 ────────────────────────────────────────────
+function makeDummy(lat, lon) {
+  const dates = [];
+  for (let m=0; m<24; m++) {
+    const y = 2024 + Math.floor(m/12);
+    const mo = String((m%12)+1).padStart(2,'0');
+    dates.push(`${y}.${mo}`);
+  }
+  const cells = [];
+  const BUF = 0.035;
+  for (let i=0; i<120; i++) {
+    const clat = lat - BUF + Math.random()*BUF*2;
+    const clon = lon - BUF + Math.random()*BUF*2;
+    const dist = Math.sqrt((clat-lat)**2+(clon-lon)**2);
+    const base = -(Math.random()*8 + dist*200);
+    const hot  = dist<0.01 ? -(Math.random()*15) : 0;
+    const v    = Math.max(base+hot, -35);
+    const ts   = dates.map((_,i) => parseFloat((v/24*i+(Math.random()-0.5)*1.5).toFixed(1)));
+    cells.push({lat:parseFloat(clat.toFixed(5)), lon:parseFloat(clon.toFixed(5)), v:parseFloat(v.toFixed(1)), ts});
+  }
+  return {airport:'', generated:'더미', dates, cell_m:80, cells};
+}
+
+// ── 공항 탭 ────────────────────────────────────────────────
+function buildTabs() {
+  const bar = document.getElementById('airport-bar');
+  AIRPORTS.forEach((ap, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'ap-btn' + (idx===2 ? ' active' : '');
+    btn.textContent = ap.name;
+    btn.onclick = () => switchAirport(ap, btn);
+    bar.appendChild(btn);
+  });
+}
+
+function switchAirport(ap, btn) {
+  document.querySelectorAll('.ap-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPeriod = null;
+  selectedCell  = null;
+  map.setView([ap.lat, ap.lon], 13);
+
+  const apData = window.KAC_DATA && window.KAC_DATA[ap.code];
+  if (apData) {
+    loadData(apData);
+    document.getElementById('demo-banner').style.display = 'none';
+  } else {
+    loadData(makeDummy(ap.lat, ap.lon));
+    document.getElementById('demo-banner').style.display = 'block';
+  }
+}
+
+function loadData(data) {
+  currentData   = data;
+  currentPeriod = null;
+  selectedCell  = null;
+  buildSlider(data.dates);
+  renderGrid(data);
+}
+
+// ── 초기 실행 ──────────────────────────────────────────────
+buildTabs();
+const initAp = AIRPORTS[2]; // 김해공항
+map.setView([initAp.lat, initAp.lon], 13);
+
+const initData = window.KAC_DATA && window.KAC_DATA[initAp.code];
+if (initData) {
+  loadData(initData);
+  document.getElementById('demo-banner').style.display = 'none';
+} else {
+  loadData(makeDummy(initAp.lat, initAp.lon));
+}
+</script>
+
+<!-- 공항별 실측 데이터 — 파일이 없으면 해당 공항은 더미 데이터 표시 -->
+<script src="data_GMP.js" onerror=""></script>
+<script src="data_CJU.js" onerror=""></script>
+<script src="data_PUS.js" onerror=""></script>
+<script src="data_TAE.js" onerror=""></script>
+<script src="data_CJJ.js" onerror=""></script>
+<script src="data_KWJ.js" onerror=""></script>
+<script src="data_RSU.js" onerror=""></script>
+<script src="data_HIN.js" onerror=""></script>
+<script src="data_USN.js" onerror=""></script>
+<script src="data_KPO.js" onerror=""></script>
+<script src="data_KUV.js" onerror=""></script>
+<script src="data_WJU.js" onerror=""></script>
+<script src="data_YNY.js" onerror=""></script>
+<script src="data_MWX.js" onerror=""></script>
+
+</body>
+</html>

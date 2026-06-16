@@ -1,0 +1,17 @@
+# 대용량 데이터 (GitHub 업로드 제외)
+hyp3_products/
+clipped/
+mintpy/
+*.zip
+
+# 비밀번호 파일 (절대 업로드 금지)
+_netrc
+.netrc
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+
+# 로그
+auto_update.log
