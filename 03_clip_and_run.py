@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 [3단계] 간섭도들을 공통 격자로 절단 → MintPy(SBAS) 시계열 분석
-실행:  python 03_clip_and_run.py [공항번호]
+실행:  python 03_clip_and_run.py [공항번호 [해상도m]]
+  예)  python 03_clip_and_run.py 9 160   ← USN을 160m로 처리
 산출:  ./mintpy/{코드}/velocity.h5 (침하속도), timeseries*.h5 (누적변위)
 """
 import shutil
@@ -14,6 +15,8 @@ from osgeo import gdal, osr
 from airports import select_airport, BUF, AIRPORTS
 
 gdal.UseExceptions()
+
+DEFAULT_RES = 80  # 기본 해상도 (HyP3 INT80 원본)
 
 
 def get_airport():
@@ -38,7 +41,11 @@ W, E = lon - BUF, lon + BUF
 S, N = lat - BUF, lat + BUF
 REGION = code
 
-RES        = 80
+# 해상도: CLI 3번째 인수로 지정 가능 (예: python 03_clip_and_run.py 9 160)
+try:
+    RES = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_RES
+except ValueError:
+    RES = DEFAULT_RES
 CLIP       = Path("clipped")   / REGION
 MINTPY_DIR = Path("mintpy")    / REGION
 
@@ -115,6 +122,7 @@ mintpy.load.demFile           = ../../clipped/{REGION}/*/*_dem.tif
 mintpy.load.incAngleFile      = ../../clipped/{REGION}/*/*_lv_theta.tif
 mintpy.load.azAngleFile       = ../../clipped/{REGION}/*/*_lv_phi.tif
 mintpy.network.coherenceBased = yes
+mintpy.network.minCoherence   = 0.5
 mintpy.troposphericDelay.method = no
 mintpy.topographicResidual    = no
 mintpy.deramp                 = no
