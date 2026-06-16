@@ -539,19 +539,12 @@ function renderVisible() {
   const bounds = map.getBounds().pad(0.5);
   const airportOnly = document.getElementById('airport-only').checked;
 
-  // 줌 레벨별 세부 설정
-  // pxPerDeg: 1도당 화면 픽셀 수 (적도 기준 근사값)
-  const pxPerDeg = (256 * Math.pow(2, zoom)) / 360;
-  const naturalDeg = (data.cell_m || 80) * 0.000009; // 실제 격자 크기(도)
-  // 최대 25px, 최소 2px 로 시각 크기 제한
-  const maxDeg = 25 / pxPerDeg;
-  const minDeg = 2  / pxPerDeg;
-  const geoSize = Math.min(Math.max(naturalDeg, minDeg), maxDeg);
-
-  // zoom < 10: circleMarker(2px 점), zoom >= 10: rectangle
-  const useCircle = zoom < 10;
-  // 줌아웃 시 샘플링 (성능 보호: 화면당 최대 ~8000개)
-  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 10 ? 2 : 1;
+  // 위도 방향 격자 크기(도): cell_m을 1도=111km 로 변환
+  const latSize = (data.cell_m || 80) / 111000;
+  // zoom < 9: circleMarker(2px), zoom >= 9: 실제 지리 크기 rectangle
+  const useCircle = zoom < 9;
+  // 저줌 샘플링 (성능 보호: 전체 씬이 뷰포트에 들어오는 구간)
+  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 11 ? 2 : 1;
 
   const layers = [];
   data.cells.forEach((cell, idx) => {
@@ -563,19 +556,24 @@ function renderVisible() {
     const v   = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
     const col = velColor(v);
 
-    const layer = useCircle
-      ? L.circleMarker([cell.lat, cell.lon], {
-          renderer: RENDERER, radius: 2,
-          fillColor: col, fillOpacity: 0.85,
-          color: 'transparent', weight: 0
-        })
-      : L.rectangle(
-          [[cell.lat - geoSize/2, cell.lon - geoSize/2],
-           [cell.lat + geoSize/2, cell.lon + geoSize/2]],
-          { renderer: RENDERER,
-            fillColor: col, fillOpacity: 0.75,
-            color: col, weight: 0.4, opacity: 0.5 }
-        );
+    let layer;
+    if (useCircle) {
+      layer = L.circleMarker([cell.lat, cell.lon], {
+        renderer: RENDERER, radius: 2,
+        fillColor: col, fillOpacity: 0.85,
+        color: 'transparent', weight: 0
+      });
+    } else {
+      // 경도 방향은 위도별 cos 보정으로 격자 간격에 딱 맞춤
+      const lonSize = latSize / Math.cos(cell.lat * Math.PI / 180);
+      layer = L.rectangle(
+        [[cell.lat - latSize/2, cell.lon - lonSize/2],
+         [cell.lat + latSize/2, cell.lon + lonSize/2]],
+        { renderer: RENDERER,
+          fillColor: col, fillOpacity: 0.75,
+          color: col, weight: 0.3, opacity: 0.4 }
+      );
+    }
     layer.on('click', () => { selectedCell = cell; showCell(cell, data.dates); });
     layers.push(layer);
   });
