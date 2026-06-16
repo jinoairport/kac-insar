@@ -18,7 +18,8 @@ AIRPORTS = [
     {"name": "무안공항",     "code": "MWX", "lon": 126.3828, "lat": 34.9914},
 ]
 
-BUF = 0.04  # 공항 중심에서 ±0.04도 (약 4km) — 분석 범위
+BUF          = 0.5   # 공항 중심에서 ±0.5도 (약 50km) — 분석 범위
+AIRPORT_BUF  = 0.04  # 공항 구역 필터용 반경 (웹 체크박스)
 
 
 def select_airport():

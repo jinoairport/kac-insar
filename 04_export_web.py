@@ -12,7 +12,7 @@ import h5py
 import numpy as np
 from pyproj import Transformer
 
-from airports import select_airport
+from airports import select_airport, AIRPORT_BUF
 
 airport = select_airport()
 print(f"\n[선택] {airport['name']} ({airport['code']})")
@@ -75,12 +75,15 @@ for i, j in zip(*np.where(valid)):
     })
 
 data = {
-    "airport": airport["name"],
-    "code":    airport["code"],
-    "generated": date.today().isoformat(),
-    "dates":   [f"{d[:4]}.{d[4:6]}" for d in dates],
-    "cell_m":  abs(dx),
-    "cells":   cells,
+    "airport":     airport["name"],
+    "code":        airport["code"],
+    "generated":   date.today().isoformat(),
+    "dates":       [f"{d[:4]}.{d[4:6]}" for d in dates],
+    "cell_m":      abs(dx),
+    "center_lat":  airport["lat"],
+    "center_lon":  airport["lon"],
+    "airport_buf": AIRPORT_BUF,
+    "cells":       cells,
 }
 OUT.write_text(
     "window.KAC_DATA = window.KAC_DATA || {};\n"

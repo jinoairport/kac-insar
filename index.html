@@ -121,6 +121,14 @@
   }
   #download-btn:hover { background: #243446; border-color: #4fc3f7; color: #4fc3f7; }
   #download-btn:disabled { opacity: 0.5; cursor: wait; }
+  #airport-filter-label {
+    position: absolute; top: 82px; right: 10px; z-index: 1000;
+    background: #1a2636; color: #e0e0e0; border: 1px solid #2a3a50;
+    padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  #airport-filter-label:hover { background: #243446; }
+  #airport-only { cursor: pointer; accent-color: #4fc3f7; }
 
   #legend {
     position: absolute; bottom: 24px; left: 10px; z-index: 1000;
@@ -184,6 +192,10 @@
   <div id="map">
     <button id="layer-btn" onclick="toggleLayer()">위성영상</button>
     <button id="download-btn" onclick="downloadMap()">화면저장</button>
+    <label id="airport-filter-label">
+      <input type="checkbox" id="airport-only" onchange="onFilterChange()">
+      공항 구역만
+    </label>
     <div id="legend">
       <div style="font-weight:700; margin-bottom:4px; color:#fff;">침하속도 (mm/yr)</div>
       <div class="leg-row"><div class="leg-box" style="background:#4caf50"></div> 0 ~ -5 (안정)</div>
@@ -504,14 +516,30 @@ function toggleLayer() {
   else        { map.removeLayer(satLayer); osmLayer.addTo(map); document.getElementById('layer-btn').textContent='위성영상'; }
 }
 
+// ── 공항 구역 필터 ─────────────────────────────────────────
+function isInAirportZone(cell, data) {
+  if (!data.center_lat) return true;  // 구버전 데이터 호환
+  const buf = data.airport_buf || 0.04;
+  return Math.abs(cell.lat - data.center_lat) <= buf &&
+         Math.abs(cell.lon - data.center_lon) <= buf;
+}
+
+function onFilterChange() {
+  if (currentData) renderGrid(currentData);
+}
+
 // ── 격자 렌더링 ────────────────────────────────────────────
 function renderGrid(data) {
   currentData = data;
   if (gridLayer) map.removeLayer(gridLayer);
   const size = (data.cell_m || 80) * 0.000009;
+  const airportOnly = document.getElementById('airport-only').checked;
 
   let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
-  const layers = data.cells.map(cell => {
+  const layers = [];
+  data.cells.forEach(cell => {
+    if (airportOnly && !isInAirportZone(cell, data)) return;
+
     const { ts } = sliceByPeriod(cell, data.dates);
     const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
     const col = velColor(v);
@@ -526,7 +554,7 @@ function renderGrid(data) {
       {color:col, fillColor:col, fillOpacity:0.65, weight:0.5, opacity:0.4}
     );
     rect.on('click', () => { selectedCell = cell; showCell(cell, data.dates); });
-    return rect;
+    layers.push(rect);
   });
 
   gridLayer = L.layerGroup(layers).addTo(map);

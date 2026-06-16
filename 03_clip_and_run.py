@@ -12,7 +12,7 @@ from pathlib import Path
 
 from osgeo import gdal, osr
 
-from airports import select_airport, BUF
+from airports import select_airport, BUF, AIRPORT_BUF
 
 gdal.UseExceptions()
 
@@ -23,7 +23,7 @@ lon, lat = airport["lon"], airport["lat"]
 W, E = lon - BUF, lon + BUF
 S, N = lat - BUF, lat + BUF
 
-RES      = 80
+RES      = 500
 CLIP     = Path("clipped")       / airport["code"]
 MINTPY_DIR = Path("mintpy")      / airport["code"]
 
