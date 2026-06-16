@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 [4단계] MintPy 산출물 → 웹페이지용 경량 데이터(data_{코드}.js) 추출
-실행:  python 04_export_web.py
+실행:  python 04_export_web.py [공항번호]
 """
 import json
 from datetime import date
@@ -11,29 +11,32 @@ import h5py
 import numpy as np
 from pyproj import Transformer
 
-from airports import select_airport, AIRPORT_BUF, GYEONGNAM_AIRPORTS, AIRPORTS
+from airports import select_airport, AIRPORT_BUF, AIRPORTS
 
-airport = select_airport()
+
+def get_airport():
+    """CLI 인수(공항 번호)가 있으면 바로 선택, 없으면 대화형 메뉴."""
+    import sys
+    if len(sys.argv) > 1:
+        try:
+            sel = int(sys.argv[1])
+            if 1 <= sel <= len(AIRPORTS):
+                return AIRPORTS[sel - 1]
+        except ValueError:
+            pass
+    return select_airport()
+
+
+airport = get_airport()
 print(f"\n[선택] {airport['name']} ({airport['code']})")
 
 code = airport["code"]
-
-# 경상도권 공항 → GYEONGNAM 통합 분석 결과 사용, 파일 하나로 출력
-if code in GYEONGNAM_AIRPORTS:
-    MINTPY_DIR = Path("mintpy") / "GYEONGNAM"
-    OUT        = Path("data_GYEONGNAM.js")
-    region_airports = [
-        {"code": a["code"], "name": a["name"],
-         "lat": a["lat"], "lon": a["lon"]}
-        for a in AIRPORTS if a["code"] in GYEONGNAM_AIRPORTS
-    ]
-else:
-    MINTPY_DIR = Path("mintpy") / code
-    OUT        = Path(f"data_{code}.js")
-    region_airports = [
-        {"code": code, "name": airport["name"],
-         "lat": airport["lat"], "lon": airport["lon"]}
-    ]
+MINTPY_DIR = Path("mintpy") / code
+OUT        = Path(f"data_{code}.js")
+region_airports = [
+    {"code": code, "name": airport["name"],
+     "lat": airport["lat"], "lon": airport["lon"]}
+]
 
 if not MINTPY_DIR.exists():
     raise SystemExit(f"{MINTPY_DIR} 가 없습니다. 03번 스크립트를 먼저 실행하세요.")
@@ -92,7 +95,7 @@ for i, j in zip(*np.where(valid)):
     })
 
 data = {
-    "code":        code if code not in GYEONGNAM_AIRPORTS else "GYEONGNAM",
+    "code":        code,
     "generated":   date.today().isoformat(),
     "dates":       [f"{d[:4]}.{d[4:6]}" for d in dates],
     "cell_m":      abs(dx),

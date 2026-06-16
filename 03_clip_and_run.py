@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 [3단계] 간섭도들을 공통 격자로 절단 → MintPy(SBAS) 시계열 분석
-실행:  python 03_clip_and_run.py
+실행:  python 03_clip_and_run.py [공항번호]
 산출:  ./mintpy/{코드}/velocity.h5 (침하속도), timeseries*.h5 (누적변위)
 """
 import shutil
@@ -11,30 +11,34 @@ from pathlib import Path
 
 from osgeo import gdal, osr
 
-from airports import select_airport, BUF, AIRPORT_BUF, GYEONGNAM_BOUNDS, GYEONGNAM_AIRPORTS
+from airports import select_airport, BUF, AIRPORTS
 
 gdal.UseExceptions()
 
-airport = select_airport()
+
+def get_airport():
+    """CLI 인수(공항 번호)가 있으면 바로 선택, 없으면 대화형 메뉴."""
+    if len(sys.argv) > 1:
+        try:
+            sel = int(sys.argv[1])
+            if 1 <= sel <= len(AIRPORTS):
+                return AIRPORTS[sel - 1]
+        except ValueError:
+            pass
+    return select_airport()
+
+
+airport = get_airport()
 print(f"\n[선택] {airport['name']} ({airport['code']})")
 
 lon, lat = airport["lon"], airport["lat"]
 code = airport["code"]
 
-# 경상도권 공항은 커버리지 전체 범위 / 그 외는 공항 중심 버퍼
-if code in GYEONGNAM_AIRPORTS:
-    W = GYEONGNAM_BOUNDS["W"]
-    E = GYEONGNAM_BOUNDS["E"]
-    S = GYEONGNAM_BOUNDS["S"]
-    N = GYEONGNAM_BOUNDS["N"]
-    REGION = "GYEONGNAM"
-    print(f"[정보] 경상도권 전체 커버리지 범위로 처리합니다 (lon {W}~{E}, lat {S}~{N})")
-else:
-    W, E = lon - BUF, lon + BUF
-    S, N = lat - BUF, lat + BUF
-    REGION = code
+W, E = lon - BUF, lon + BUF
+S, N = lat - BUF, lat + BUF
+REGION = code
 
-RES        = 500
+RES        = 80
 CLIP       = Path("clipped")   / REGION
 MINTPY_DIR = Path("mintpy")    / REGION
 

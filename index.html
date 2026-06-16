@@ -222,7 +222,11 @@
 <!-- 공항별 실측 데이터 — 파일이 없으면 해당 공항은 더미 데이터 표시 -->
 <script src="data_GMP.js" onerror=""></script>
 <script src="data_CJU.js" onerror=""></script>
-<script src="data_GYEONGNAM.js" onerror=""></script>
+<script src="data_PUS.js" onerror=""></script>
+<script src="data_TAE.js" onerror=""></script>
+<script src="data_HIN.js" onerror=""></script>
+<script src="data_USN.js" onerror=""></script>
+<script src="data_KPO.js" onerror=""></script>
 <script src="data_CJJ.js" onerror=""></script>
 <script src="data_KWJ.js" onerror=""></script>
 <script src="data_RSU.js" onerror=""></script>
@@ -248,11 +252,6 @@ const AIRPORTS = [
   {name:"양양공항",     code:"YNY", lat:38.0613, lon:128.6693},
   {name:"무안공항",     code:"MWX", lat:34.9914, lon:126.3828},
 ];
-
-// 경상도권 공항 코드 — 하나의 data_GYEONGNAM.js 공유
-const GYEONGNAM_CODES = ["PUS","TAE","HIN","USN","KPO"];
-// 경상도권 전체 커버리지 (Sentinel-1 path036)
-const GYEONGNAM_BOUNDS = [[34.30, 127.40],[36.70, 130.70]];
 
 let currentPeriod = null;
 let currentData   = null;
@@ -541,11 +540,10 @@ function renderVisible() {
 
   // 위도 방향 격자 크기(도): cell_m을 1도=111km 로 변환
   const latSize = (data.cell_m || 80) / 111000;
-  // zoom < 10: circleMarker(2px 점), zoom >= 10: 실제 지리 크기 rectangle
-  const useCircle = zoom < 10;
-  // zoom 10 이상은 뷰포트 컬링으로만 성능 관리 (샘플링 없음 → 빈틈 없음)
-  // zoom 9 이하만 씬 전체가 화면에 들어와 샘플링 필요
-  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 10 ? 3 : 1;
+  // 현재 줌에서 격자 1개의 화면 픽셀 크기 계산 (1타일=256px, 360°/2^z 커버)
+  const cellPx = latSize * 256 * Math.pow(2, zoom) / 360;
+  const useCircle = cellPx < 3;  // 3px 미만이면 원형 점으로 표시
+  const step = cellPx < 0.5 ? 8 : cellPx < 1 ? 4 : cellPx < 2 ? 2 : 1;
 
   const layers = [];
   data.cells.forEach((cell, idx) => {
@@ -685,37 +683,19 @@ function buildTabs() {
   });
 }
 
-function getDataKey(code) {
-  return GYEONGNAM_CODES.includes(code) ? 'GYEONGNAM' : code;
-}
-
 function switchAirport(ap, btn) {
   document.querySelectorAll('.ap-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 
-  const prevAirport = currentAirport;
   currentAirport = ap;
   selectedCell   = null;
 
-  const dataKey  = getDataKey(ap.code);
-  const apData   = window.KAC_DATA && window.KAC_DATA[dataKey];
+  const apData = window.KAC_DATA && window.KAC_DATA[ap.code];
 
   if (apData) {
-    // 경상도권 공항 간 전환: 데이터 재로드 없이 줌만 이동
-    const prevKey = prevAirport ? getDataKey(prevAirport.code) : null;
-    if (dataKey === 'GYEONGNAM' && prevKey === 'GYEONGNAM' && currentData) {
-      map.setView([ap.lat, ap.lon], 11);
-      computeStats(currentData);
-      renderVisible();
-      document.getElementById('demo-banner').style.display = 'none';
-      return;
-    }
-    // 처음 GYEONGNAM 데이터 로드: 공항 중심 줌11 (공항 주변 격자 즉시 보임)
-    if (dataKey === 'GYEONGNAM') {
-      map.setView([ap.lat, ap.lon], 11);
-    } else {
-      map.setView([ap.lat, ap.lon], 13);
-    }
+    // 해상도에 따라 초기 줌 결정: 80m→줌13(4px/격자), 500m 이상→줌11
+    const initZoom = (apData.cell_m || 80) <= 100 ? 13 : 11;
+    map.setView([ap.lat, ap.lon], initZoom);
     loadData(apData);
     document.getElementById('demo-banner').style.display = 'none';
   } else {
@@ -738,14 +718,10 @@ buildTabs();
 const initAp = AIRPORTS[2]; // 김해공항
 currentAirport = initAp;
 
-const initKey  = getDataKey(initAp.code);
-const initData = window.KAC_DATA && window.KAC_DATA[initKey];
+const initData = window.KAC_DATA && window.KAC_DATA[initAp.code];
 if (initData) {
-  if (initKey === 'GYEONGNAM') {
-    map.setView([initAp.lat, initAp.lon], 11);
-  } else {
-    map.setView([initAp.lat, initAp.lon], 13);
-  }
+  const initZoom = (initData.cell_m || 80) <= 100 ? 13 : 11;
+  map.setView([initAp.lat, initAp.lon], initZoom);
   loadData(initData);
   document.getElementById('demo-banner').style.display = 'none';
 } else {
