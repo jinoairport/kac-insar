@@ -18,8 +18,12 @@ AIRPORTS = [
     {"name": "무안공항",     "code": "MWX", "lon": 126.3828, "lat": 34.9914},
 ]
 
-BUF          = 0.5   # 공항 중심에서 ±0.5도 (약 50km) — 분석 범위
+BUF          = 0.04  # 공항 중심 ±0.04도 (기타 공항 기본값)
 AIRPORT_BUF  = 0.04  # 공항 구역 필터용 반경 (웹 체크박스)
+
+# 경상도권 Sentinel-1 path036 커버리지 전체 범위
+GYEONGNAM_BOUNDS   = {"W": 127.40, "E": 130.70, "S": 34.30, "N": 36.70}
+GYEONGNAM_AIRPORTS = ["PUS", "TAE", "HIN", "USN", "KPO"]  # 같은 위성 패스 공유
 
 
 def select_airport():

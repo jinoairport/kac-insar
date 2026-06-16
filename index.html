@@ -21,7 +21,6 @@
   #header .sub { font-size: 11px; color: #7a9bb5; margin-top: 2px; }
   #updated { font-size: 11px; color: #7a9bb5; text-align: right; }
 
-  /* 공항 탭 */
   #airport-bar {
     background: #1a2636; padding: 0 16px;
     display: flex; gap: 6px; overflow-x: auto;
@@ -35,7 +34,6 @@
   }
   .ap-btn.active { color: #4fc3f7; border-bottom-color: #4fc3f7; font-weight: 700; }
 
-  /* 기간 선택 바 */
   #period-bar {
     background: #131f2e; padding: 8px 16px 10px;
     border-bottom: 1px solid #2a3a50; flex-shrink: 0;
@@ -53,7 +51,6 @@
   }
   #reset-btn:hover { color: #4fc3f7; border-color: #4fc3f7; }
 
-  /* 슬라이더 트랙 */
   #slider-wrap { position: relative; height: 28px; padding: 0 8px; }
   #slider-track {
     position: absolute; top: 50%; left: 8px; right: 8px;
@@ -76,7 +73,6 @@
   }
   #min-warn { font-size: 10px; color: #ff9800; text-align: center; margin-top: 2px; display: none; }
 
-  /* 요약 바 */
   #summary {
     background: #1a2636; padding: 8px 16px;
     display: flex; gap: 8px; flex-wrap: wrap;
@@ -226,14 +222,10 @@
 <!-- 공항별 실측 데이터 — 파일이 없으면 해당 공항은 더미 데이터 표시 -->
 <script src="data_GMP.js" onerror=""></script>
 <script src="data_CJU.js" onerror=""></script>
-<script src="data_PUS.js" onerror=""></script>
-<script src="data_TAE.js" onerror=""></script>
+<script src="data_GYEONGNAM.js" onerror=""></script>
 <script src="data_CJJ.js" onerror=""></script>
 <script src="data_KWJ.js" onerror=""></script>
 <script src="data_RSU.js" onerror=""></script>
-<script src="data_HIN.js" onerror=""></script>
-<script src="data_USN.js" onerror=""></script>
-<script src="data_KPO.js" onerror=""></script>
 <script src="data_KUV.js" onerror=""></script>
 <script src="data_WJU.js" onerror=""></script>
 <script src="data_YNY.js" onerror=""></script>
@@ -257,14 +249,18 @@ const AIRPORTS = [
   {name:"무안공항",     code:"MWX", lat:34.9914, lon:126.3828},
 ];
 
-// ── 현재 선택된 기간 (null = 전체) ────────────────────────
-let currentPeriod = null;  // {startIdx, endIdx}
+// 경상도권 공항 코드 — 하나의 data_GYEONGNAM.js 공유
+const GYEONGNAM_CODES = ["PUS","TAE","HIN","USN","KPO"];
+// 경상도권 전체 커버리지 (Sentinel-1 path036)
+const GYEONGNAM_BOUNDS = [[34.30, 127.40],[36.70, 130.70]];
+
+let currentPeriod = null;
 let currentData   = null;
+let currentAirport = null;
 let selectedCell  = null;
 let gridLayer     = null;
 let chartD = null, chartM = null;
 
-// ── 색상/등급 ──────────────────────────────────────────────
 function velColor(v) {
   if (v > -5)  return '#4caf50';
   if (v > -10) return '#ffeb3b';
@@ -278,17 +274,15 @@ function velLabel(v) {
   return '위험';
 }
 
-// ── 선형회귀로 침하속도 계산 (mm/yr) ─────────────────────
 function calcVelocity(ts) {
   const n = ts.length;
   if (n < 2) return 0;
   let sx=0, sy=0, sxy=0, sx2=0;
   for (let i=0; i<n; i++) { sx+=i; sy+=ts[i]; sxy+=i*ts[i]; sx2+=i*i; }
   const slope = (n*sxy - sx*sy) / (n*sx2 - sx*sx);
-  return slope * 12;  // 월→연 환산
+  return slope * 12;
 }
 
-// ── 기간 필터 적용해서 ts/dates 슬라이스 ─────────────────
 function sliceByPeriod(cell, allDates) {
   if (!currentPeriod) return { dates: allDates, ts: cell.ts };
   const { si, ei } = currentPeriod;
@@ -298,7 +292,7 @@ function sliceByPeriod(cell, allDates) {
 // ── 슬라이더 ───────────────────────────────────────────────
 let sliderDates = [];
 let siIdx = 0, eiIdx = 0;
-const MIN_SPAN = 6;  // 최소 6개월
+const MIN_SPAN = 6;
 
 function buildSlider(dates) {
   sliderDates = dates;
@@ -317,7 +311,6 @@ function removeSliderTicks() {
 function addSliderTicks(dates) {
   const wrap = document.getElementById('slider-wrap');
   const n = dates.length;
-  // 1년(12개월) 단위로 눈금 표시
   for (let i = 0; i < n; i += 12) {
     const pct = i / (n - 1) * 100;
     const tick = document.createElement('div');
@@ -328,16 +321,10 @@ function addSliderTicks(dates) {
   }
 }
 
-function idxToPct(idx) {
-  return idx / (sliderDates.length - 1) * 100;
-}
-
-function pctToIdx(pct) {
-  return Math.round(pct / 100 * (sliderDates.length - 1));
-}
+function idxToPct(idx) { return idx / (sliderDates.length - 1) * 100; }
+function pctToIdx(pct) { return Math.round(pct / 100 * (sliderDates.length - 1)); }
 
 function fmtDate(d) {
-  // "2024.06" → "2024년6월"
   const [y, m] = d.split('.');
   return `${y}년${parseInt(m,10)}월`;
 }
@@ -355,7 +342,6 @@ function updateSliderUI() {
   document.getElementById('handle-r').style.left = `calc(${rPct}% + 8px)`;
   document.getElementById('slider-fill').style.left  = lPct + '%';
   document.getElementById('slider-fill').style.width = (rPct - lPct) + '%';
-
   document.getElementById('min-warn').style.display = 'none';
   document.getElementById('period-label').style.color = '#4fc3f7';
   document.getElementById('period-label').textContent = periodStr(siIdx, eiIdx);
@@ -378,11 +364,9 @@ function resetPeriod() {
 }
 
 function initDrag() {
-  const wrap  = document.getElementById('slider-wrap');
   const track = document.getElementById('slider-track');
   let dragging = null;
 
-  function getTrackWidth() { return track.offsetWidth; }
   function getPct(clientX) {
     const rect = track.getBoundingClientRect();
     return Math.max(0, Math.min(100, (clientX - rect.left) / rect.width * 100));
@@ -392,23 +376,18 @@ function initDrag() {
     if (!dragging) return;
     const idx = pctToIdx(getPct(clientX));
     const maxIdx = sliderDates.length - 1;
-
     if (dragging === 'l') {
       if (idx <= eiIdx - MIN_SPAN) {
-        // 여유 있음 — 왼쪽 핸들만 이동
         siIdx = Math.max(0, idx);
       } else {
-        // 최소 간격 도달 — 전체 범위를 오른쪽으로 밀기
         const span = eiIdx - siIdx;
         siIdx = Math.min(idx, maxIdx - span);
         eiIdx = siIdx + span;
       }
     } else {
       if (idx >= siIdx + MIN_SPAN) {
-        // 여유 있음 — 오른쪽 핸들만 이동
         eiIdx = Math.min(maxIdx, idx);
       } else {
-        // 최소 간격 도달 — 전체 범위를 왼쪽으로 밀기
         const span = eiIdx - siIdx;
         eiIdx = Math.max(idx, span);
         siIdx = eiIdx - span;
@@ -417,17 +396,12 @@ function initDrag() {
     updateSliderUI();
   }
 
-  function onEnd() {
-    if (!dragging) return;
-    dragging = null;
-    applyPeriod();
-  }
+  function onEnd() { if (!dragging) return; dragging = null; applyPeriod(); }
 
   document.getElementById('handle-l').addEventListener('mousedown',  () => dragging = 'l');
   document.getElementById('handle-r').addEventListener('mousedown',  () => dragging = 'r');
   document.getElementById('handle-l').addEventListener('touchstart', (e) => { dragging='l'; e.preventDefault(); }, {passive:false});
   document.getElementById('handle-r').addEventListener('touchstart', (e) => { dragging='r'; e.preventDefault(); }, {passive:false});
-
   window.addEventListener('mousemove',  (e) => onMove(e.clientX));
   window.addEventListener('touchmove',  (e) => onMove(e.touches[0].clientX), {passive:true});
   window.addEventListener('mouseup',    onEnd);
@@ -447,17 +421,11 @@ async function downloadMap() {
   btn.textContent = '저장 중…';
   btn.disabled = true;
   try {
-    // 저장 대상: 지도 + 우측 패널 포함 전체 영역
     const target = document.getElementById('main');
     const canvas = await html2canvas(target, {
-      useCORS: true,
-      allowTaint: false,
-      logging: false,
-      backgroundColor: '#0f1923',
-      scale: window.devicePixelRatio || 1
+      useCORS: true, allowTaint: false, logging: false,
+      backgroundColor: '#0f1923', scale: window.devicePixelRatio || 1
     });
-
-    // 상단 정보 바 추가
     const activeBtn = document.querySelector('.ap-btn.active');
     const apName = activeBtn ? activeBtn.textContent : '공항';
     const periodLabel = document.getElementById('period-label').textContent;
@@ -473,12 +441,8 @@ async function downloadMap() {
     out.width  = canvas.width;
     out.height = canvas.height + BAR;
     const ctx = out.getContext('2d');
-
-    // 정보 바 배경
     ctx.fillStyle = '#1a2636';
     ctx.fillRect(0, 0, out.width, BAR);
-
-    // 하단 경계선
     ctx.fillStyle = '#2a3a50';
     ctx.fillRect(0, BAR - 1, out.width, 1);
 
@@ -486,15 +450,11 @@ async function downloadMap() {
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${14*sc}px Malgun Gothic, sans-serif`;
     ctx.fillText(`한국공항공사 지반침하 모니터링  ·  ${apName}  ·  ${periodLabel}`, 10*sc, 26*sc);
-
     ctx.fillStyle = '#7a9bb5';
     ctx.font = `${11*sc}px Malgun Gothic, sans-serif`;
-    const stats = `안정 ${safeLabel}  주의 ${watchLabel}  경계 ${alertLabel}  위험 ${dangerLabel}     출력: ${dateStr}`;
     ctx.textAlign = 'right';
-    ctx.fillText(stats, out.width - 10*sc, 26*sc);
+    ctx.fillText(`안정 ${safeLabel}  주의 ${watchLabel}  경계 ${alertLabel}  위험 ${dangerLabel}     출력: ${dateStr}`, out.width - 10*sc, 26*sc);
     ctx.textAlign = 'left';
-
-    // 캡처된 지도 붙이기
     ctx.drawImage(canvas, 0, BAR);
 
     const link = document.createElement('a');
@@ -517,11 +477,24 @@ function toggleLayer() {
 }
 
 // ── 공항 구역 필터 ─────────────────────────────────────────
-function isInAirportZone(cell, data) {
-  if (!data.center_lat) return true;  // 구버전 데이터 호환
-  const buf = data.airport_buf || 0.04;
-  return Math.abs(cell.lat - data.center_lat) <= buf &&
-         Math.abs(cell.lon - data.center_lon) <= buf;
+function isInAirportZone(cell) {
+  if (!currentAirport) return true;
+  const data = currentData;
+  const buf = (data && data.airport_buf) || 0.04;
+
+  // 새 형식: airports 배열 포함
+  if (data && data.airports) {
+    const ap = data.airports.find(a => a.code === currentAirport.code);
+    if (!ap) return true;
+    return Math.abs(cell.lat - ap.lat) <= buf &&
+           Math.abs(cell.lon - ap.lon) <= buf;
+  }
+  // 구 형식: center_lat/center_lon
+  if (data && data.center_lat) {
+    return Math.abs(cell.lat - data.center_lat) <= buf &&
+           Math.abs(cell.lon - data.center_lon) <= buf;
+  }
+  return true;
 }
 
 function onFilterChange() {
@@ -538,7 +511,7 @@ function renderGrid(data) {
   let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
   const layers = [];
   data.cells.forEach(cell => {
-    if (airportOnly && !isInAirportZone(cell, data)) return;
+    if (airportOnly && !isInAirportZone(cell)) return;
 
     const { ts } = sliceByPeriod(cell, data.dates);
     const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
@@ -562,8 +535,13 @@ function renderGrid(data) {
   document.getElementById('cnt-watch').textContent  = cntWatch;
   document.getElementById('cnt-alert').textContent  = cntAlert;
   document.getElementById('cnt-danger').textContent = cntDanger;
-  document.getElementById('total-cnt').textContent  = `총 ${data.cells.length}개 격자`;
-  document.getElementById('updated').textContent    = `갱신: ${data.generated}`;
+
+  const shownCnt = cntSafe + cntWatch + cntAlert + cntDanger;
+  const totalCnt = data.cells.length;
+  document.getElementById('total-cnt').textContent =
+    airportOnly ? `공항구역 ${shownCnt} / 전체 ${totalCnt}개 격자`
+                : `총 ${totalCnt}개 격자`;
+  document.getElementById('updated').textContent = `갱신: ${data.generated}`;
 }
 
 // ── 그래프 ─────────────────────────────────────────────────
@@ -645,7 +623,7 @@ function makeDummy(lat, lon) {
     const ts   = dates.map((_,i) => parseFloat((v/24*i+(Math.random()-0.5)*1.5).toFixed(1)));
     cells.push({lat:parseFloat(clat.toFixed(5)), lon:parseFloat(clon.toFixed(5)), v:parseFloat(v.toFixed(1)), ts});
   }
-  return {airport:'', generated:'더미', dates, cell_m:80, cells};
+  return {code:null, generated:'더미', dates, cell_m:80, airports:[{code:null,lat,lon}], cells};
 }
 
 // ── 공항 탭 ────────────────────────────────────────────────
@@ -660,18 +638,40 @@ function buildTabs() {
   });
 }
 
+function getDataKey(code) {
+  return GYEONGNAM_CODES.includes(code) ? 'GYEONGNAM' : code;
+}
+
 function switchAirport(ap, btn) {
   document.querySelectorAll('.ap-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  currentPeriod = null;
-  selectedCell  = null;
-  map.setView([ap.lat, ap.lon], 13);
 
-  const apData = window.KAC_DATA && window.KAC_DATA[ap.code];
+  const prevAirport = currentAirport;
+  currentAirport = ap;
+  selectedCell   = null;
+
+  const dataKey  = getDataKey(ap.code);
+  const apData   = window.KAC_DATA && window.KAC_DATA[dataKey];
+
   if (apData) {
+    // 경상도권 공항 간 전환: 데이터 재로드 없이 줌만 이동
+    const prevKey = prevAirport ? getDataKey(prevAirport.code) : null;
+    if (dataKey === 'GYEONGNAM' && prevKey === 'GYEONGNAM' && currentData) {
+      map.setView([ap.lat, ap.lon], 12);
+      renderGrid(currentData);  // 필터 재적용
+      document.getElementById('demo-banner').style.display = 'none';
+      return;
+    }
+    // 처음 GYEONGNAM 데이터 로드: 전체 커버리지 표시
+    if (dataKey === 'GYEONGNAM') {
+      map.fitBounds(GYEONGNAM_BOUNDS);
+    } else {
+      map.setView([ap.lat, ap.lon], 13);
+    }
     loadData(apData);
     document.getElementById('demo-banner').style.display = 'none';
   } else {
+    map.setView([ap.lat, ap.lon], 13);
     loadData(makeDummy(ap.lat, ap.lon));
     document.getElementById('demo-banner').style.display = 'block';
   }
@@ -688,26 +688,24 @@ function loadData(data) {
 // ── 초기 실행 ──────────────────────────────────────────────
 buildTabs();
 const initAp = AIRPORTS[2]; // 김해공항
-map.setView([initAp.lat, initAp.lon], 13);
+currentAirport = initAp;
 
-const initData = window.KAC_DATA && window.KAC_DATA[initAp.code];
+const initKey  = getDataKey(initAp.code);
+const initData = window.KAC_DATA && window.KAC_DATA[initKey];
 if (initData) {
+  // 경상도권 데이터면 전체 커버리지로 초기 뷰
+  if (initKey === 'GYEONGNAM') {
+    map.fitBounds(GYEONGNAM_BOUNDS);
+  } else {
+    map.setView([initAp.lat, initAp.lon], 13);
+  }
   loadData(initData);
   document.getElementById('demo-banner').style.display = 'none';
 } else {
+  map.setView([initAp.lat, initAp.lon], 13);
   loadData(makeDummy(initAp.lat, initAp.lon));
 }
 </script>
-
-<!-- 공항별 실측 데이터 — 파일이 없으면 해당 공항은 더미 데이터 표시 -->
-<script src="data_GMP.js" onerror=""></script>
-<script src="data_CJU.js" onerror=""></script>
-<script src="data_PUS.js" onerror=""></script>
-<script src="data_TAE.js" onerror=""></script>
-<script src="data_CJJ.js" onerror=""></script>
-<script src="data_KWJ.js" onerror=""></script>
-<script src="data_RSU.js" onerror=""></script>
-<script src="data_HIN.js" onerror=""></script>
 
 </body>
 </html>
