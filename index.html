@@ -541,10 +541,11 @@ function renderVisible() {
 
   // 위도 방향 격자 크기(도): cell_m을 1도=111km 로 변환
   const latSize = (data.cell_m || 80) / 111000;
-  // zoom < 9: circleMarker(2px), zoom >= 9: 실제 지리 크기 rectangle
-  const useCircle = zoom < 9;
-  // 저줌 샘플링 (성능 보호: 전체 씬이 뷰포트에 들어오는 구간)
-  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 11 ? 2 : 1;
+  // zoom < 10: circleMarker(2px 점), zoom >= 10: 실제 지리 크기 rectangle
+  const useCircle = zoom < 10;
+  // zoom 10 이상은 뷰포트 컬링으로만 성능 관리 (샘플링 없음 → 빈틈 없음)
+  // zoom 9 이하만 씬 전체가 화면에 들어와 샘플링 필요
+  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 10 ? 3 : 1;
 
   const layers = [];
   data.cells.forEach((cell, idx) => {
