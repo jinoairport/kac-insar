@@ -501,48 +501,96 @@ function onFilterChange() {
   if (currentData) renderGrid(currentData);
 }
 
-// ── 격자 렌더링 ────────────────────────────────────────────
-function renderGrid(data) {
-  currentData = data;
-  if (gridLayer) map.removeLayer(gridLayer);
-  const size = (data.cell_m || 80) * 0.000009;
-  const airportOnly = document.getElementById('airport-only').checked;
+// ── 격자 렌더링 (캔버스 렌더러 + 뷰포트 컬링) ──────────────
+const RENDERER = L.canvas({ padding: 0.5 });
 
+// 통계 계산 (전체 셀 대상, 화면 밖 포함)
+function computeStats(data) {
+  const airportOnly = document.getElementById('airport-only').checked;
   let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
-  const layers = [];
   data.cells.forEach(cell => {
     if (airportOnly && !isInAirportZone(cell)) return;
-
     const { ts } = sliceByPeriod(cell, data.dates);
     const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
-    const col = velColor(v);
-
     if (v > -5)       cntSafe++;
     else if (v > -10) cntWatch++;
     else if (v > -20) cntAlert++;
     else              cntDanger++;
-
-    const rect = L.rectangle(
-      [[cell.lat - size/2, cell.lon - size/2],[cell.lat + size/2, cell.lon + size/2]],
-      {color:col, fillColor:col, fillOpacity:0.65, weight:0.5, opacity:0.4}
-    );
-    rect.on('click', () => { selectedCell = cell; showCell(cell, data.dates); });
-    layers.push(rect);
   });
-
-  gridLayer = L.layerGroup(layers).addTo(map);
+  const total = cntSafe + cntWatch + cntAlert + cntDanger;
   document.getElementById('cnt-safe').textContent   = cntSafe;
   document.getElementById('cnt-watch').textContent  = cntWatch;
   document.getElementById('cnt-alert').textContent  = cntAlert;
   document.getElementById('cnt-danger').textContent = cntDanger;
-
-  const shownCnt = cntSafe + cntWatch + cntAlert + cntDanger;
-  const totalCnt = data.cells.length;
-  document.getElementById('total-cnt').textContent =
-    airportOnly ? `공항구역 ${shownCnt} / 전체 ${totalCnt}개 격자`
-                : `총 ${totalCnt}개 격자`;
+  document.getElementById('total-cnt').textContent  =
+    document.getElementById('airport-only').checked
+      ? `공항구역 ${total} / 전체 ${data.cells.length}개 격자`
+      : `총 ${data.cells.length}개 격자`;
   document.getElementById('updated').textContent = `갱신: ${data.generated}`;
 }
+
+// 화면 내 격자만 그리기 (줌·패닝 시 재호출)
+function renderVisible() {
+  if (!currentData) return;
+  const data = currentData;
+  if (gridLayer) { map.removeLayer(gridLayer); gridLayer = null; }
+
+  const zoom   = map.getZoom();
+  const bounds = map.getBounds().pad(0.5);
+  const airportOnly = document.getElementById('airport-only').checked;
+
+  // 줌 레벨별 세부 설정
+  // pxPerDeg: 1도당 화면 픽셀 수 (적도 기준 근사값)
+  const pxPerDeg = (256 * Math.pow(2, zoom)) / 360;
+  const naturalDeg = (data.cell_m || 80) * 0.000009; // 실제 격자 크기(도)
+  // 최대 25px, 최소 2px 로 시각 크기 제한
+  const maxDeg = 25 / pxPerDeg;
+  const minDeg = 2  / pxPerDeg;
+  const geoSize = Math.min(Math.max(naturalDeg, minDeg), maxDeg);
+
+  // zoom < 10: circleMarker(2px 점), zoom >= 10: rectangle
+  const useCircle = zoom < 10;
+  // 줌아웃 시 샘플링 (성능 보호: 화면당 최대 ~8000개)
+  const step = zoom < 8 ? 8 : zoom < 9 ? 4 : zoom < 10 ? 2 : 1;
+
+  const layers = [];
+  data.cells.forEach((cell, idx) => {
+    if (idx % step !== 0) return;
+    if (airportOnly && !isInAirportZone(cell)) return;
+    if (!bounds.contains([cell.lat, cell.lon])) return;
+
+    const { ts } = sliceByPeriod(cell, data.dates);
+    const v   = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+    const col = velColor(v);
+
+    const layer = useCircle
+      ? L.circleMarker([cell.lat, cell.lon], {
+          renderer: RENDERER, radius: 2,
+          fillColor: col, fillOpacity: 0.85,
+          color: 'transparent', weight: 0
+        })
+      : L.rectangle(
+          [[cell.lat - geoSize/2, cell.lon - geoSize/2],
+           [cell.lat + geoSize/2, cell.lon + geoSize/2]],
+          { renderer: RENDERER,
+            fillColor: col, fillOpacity: 0.75,
+            color: col, weight: 0.4, opacity: 0.5 }
+        );
+    layer.on('click', () => { selectedCell = cell; showCell(cell, data.dates); });
+    layers.push(layer);
+  });
+
+  gridLayer = L.layerGroup(layers).addTo(map);
+}
+
+function renderGrid(data) {
+  currentData = data;
+  computeStats(data);
+  renderVisible();
+}
+
+// 줌·패닝 시 화면 내 격자만 재렌더
+map.on('zoomend moveend', renderVisible);
 
 // ── 그래프 ─────────────────────────────────────────────────
 function drawChart(canvasId, dates, ts, vel) {
@@ -657,14 +705,15 @@ function switchAirport(ap, btn) {
     // 경상도권 공항 간 전환: 데이터 재로드 없이 줌만 이동
     const prevKey = prevAirport ? getDataKey(prevAirport.code) : null;
     if (dataKey === 'GYEONGNAM' && prevKey === 'GYEONGNAM' && currentData) {
-      map.setView([ap.lat, ap.lon], 12);
-      renderGrid(currentData);  // 필터 재적용
+      map.setView([ap.lat, ap.lon], 11);
+      computeStats(currentData);
+      renderVisible();
       document.getElementById('demo-banner').style.display = 'none';
       return;
     }
-    // 처음 GYEONGNAM 데이터 로드: 전체 커버리지 표시
+    // 처음 GYEONGNAM 데이터 로드: 공항 중심 줌11 (공항 주변 격자 즉시 보임)
     if (dataKey === 'GYEONGNAM') {
-      map.fitBounds(GYEONGNAM_BOUNDS);
+      map.setView([ap.lat, ap.lon], 11);
     } else {
       map.setView([ap.lat, ap.lon], 13);
     }
@@ -693,9 +742,8 @@ currentAirport = initAp;
 const initKey  = getDataKey(initAp.code);
 const initData = window.KAC_DATA && window.KAC_DATA[initKey];
 if (initData) {
-  // 경상도권 데이터면 전체 커버리지로 초기 뷰
   if (initKey === 'GYEONGNAM') {
-    map.fitBounds(GYEONGNAM_BOUNDS);
+    map.setView([initAp.lat, initAp.lon], 11);
   } else {
     map.setView([initAp.lat, initAp.lon], 13);
   }
