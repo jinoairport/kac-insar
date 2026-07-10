@@ -500,6 +500,54 @@ function onFilterChange() {
   if (currentData) renderGrid(currentData);
 }
 
+// ── 격자 보간: 원본 셀 사이에 이중선형 중간값 삽입 (2× 업샘플) ──
+function buildInterpolatedData(data) {
+  if (data._interp) return data._interp;
+  const cells = data.cells;
+  const cellM = data.cell_m || 80;
+
+  // 격자 간격: 위/경도 고유값 정렬 후 중앙값 차이
+  const lats = [...new Set(cells.map(c => c.lat))].sort((a, b) => a - b);
+  const lons = [...new Set(cells.map(c => c.lon))].sort((a, b) => a - b);
+  const med = arr => arr[Math.floor(arr.length / 2)];
+  const dLat = med([...lats.slice(1, 21).map((v, i) => v - lats[i])].sort((a, b) => a - b));
+  const dLon = med([...lons.slice(1, 21).map((v, i) => v - lons[i])].sort((a, b) => a - b));
+
+  const R = 5;
+  const cmap = new Map();
+  cells.forEach(c => cmap.set(`${c.lat.toFixed(R)}_${c.lon.toFixed(R)}`, c));
+  const get = (lat, lon) => cmap.get(`${parseFloat(lat.toFixed(R))}_${parseFloat(lon.toFixed(R))}`);
+
+  const avgTs = tsList => {
+    const valid = tsList.filter(Boolean);
+    if (!valid.length || !valid[0]) return null;
+    return valid[0].map((_, i) => {
+      const vals = valid.map(ts => ts[i]).filter(v => v != null);
+      return vals.length ? parseFloat((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)) : null;
+    });
+  };
+
+  const mk = ns => ({
+    lat: parseFloat((ns.reduce((s, c) => s + c.lat, 0) / ns.length).toFixed(R)),
+    lon: parseFloat((ns.reduce((s, c) => s + c.lon, 0) / ns.length).toFixed(R)),
+    v:   parseFloat((ns.reduce((s, c) => s + c.v,   0) / ns.length).toFixed(1)),
+    ts:  avgTs(ns.map(c => c.ts)),
+  });
+
+  const extra = [];
+  cells.forEach(c => {
+    const r = get(c.lat,        c.lon + dLon);
+    const u = get(c.lat + dLat, c.lon);
+    const d = get(c.lat + dLat, c.lon + dLon);
+    if (r)         extra.push(mk([c, r]));
+    if (u)         extra.push(mk([c, u]));
+    if (r && u && d) extra.push(mk([c, r, u, d]));
+  });
+
+  data._interp = { ...data, cell_m: cellM / 2, cells: [...cells, ...extra] };
+  return data._interp;
+}
+
 // ── 격자 렌더링 (캔버스 렌더러 + 뷰포트 컬링) ──────────────
 const RENDERER = L.canvas({ padding: 0.5 });
 
@@ -531,18 +579,19 @@ function computeStats(data) {
 // 화면 내 격자만 그리기 (줌·패닝 시 재호출)
 function renderVisible() {
   if (!currentData) return;
-  const data = currentData;
+  const rawData = currentData;
+  const data    = buildInterpolatedData(rawData);
   if (gridLayer) { map.removeLayer(gridLayer); gridLayer = null; }
 
   const zoom   = map.getZoom();
   const bounds = map.getBounds().pad(0.5);
   const airportOnly = document.getElementById('airport-only').checked;
 
-  // 위도 방향 격자 크기(도): cell_m을 1도=111km 로 변환
-  const latSize = (data.cell_m || 80) / 111000;
-  // 현재 줌에서 격자 1개의 화면 픽셀 크기 계산 (1타일=256px, 360°/2^z 커버)
-  const cellPx = latSize * 256 * Math.pow(2, zoom) / 360;
-  const useCircle = cellPx < 3;  // 3px 미만이면 원형 점으로 표시
+  // 렌더 모드/스텝은 원본 격자 기준, 실제 표시 크기는 보간 후 절반
+  const origLatSize = (rawData.cell_m || 80) / 111000;
+  const latSize     = (data.cell_m   || 40) / 111000;
+  const cellPx  = origLatSize * 256 * Math.pow(2, zoom) / 360;
+  const useCircle = cellPx < 3;
   const step = cellPx < 0.5 ? 8 : cellPx < 1 ? 4 : cellPx < 2 ? 2 : 1;
 
   const layers = [];
