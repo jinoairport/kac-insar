@@ -544,7 +544,7 @@ function buildInterpolatedData(data) {
     if (r && u && d) extra.push(mk([c, r, u, d]));
   });
 
-  data._interp = { ...data, cell_m: cellM / 2, cells: [...cells, ...extra] };
+  data._interp = { ...data, cells: [...cells, ...extra] };
   return data._interp;
 }
 
@@ -579,18 +579,15 @@ function computeStats(data) {
 // 화면 내 격자만 그리기 (줌·패닝 시 재호출)
 function renderVisible() {
   if (!currentData) return;
-  const rawData = currentData;
-  const data    = buildInterpolatedData(rawData);
+  const data = buildInterpolatedData(currentData);
   if (gridLayer) { map.removeLayer(gridLayer); gridLayer = null; }
 
   const zoom   = map.getZoom();
   const bounds = map.getBounds().pad(0.5);
   const airportOnly = document.getElementById('airport-only').checked;
 
-  // 렌더 모드/스텝은 원본 격자 기준, 실제 표시 크기는 보간 후 절반
-  const origLatSize = (rawData.cell_m || 80) / 111000;
-  const latSize     = (data.cell_m   || 40) / 111000;
-  const cellPx  = origLatSize * 256 * Math.pow(2, zoom) / 360;
+  const latSize = (data.cell_m || 80) / 111000;
+  const cellPx  = latSize * 256 * Math.pow(2, zoom) / 360;
   const useCircle = cellPx < 3;
   const step = cellPx < 0.5 ? 8 : cellPx < 1 ? 4 : cellPx < 2 ? 2 : 1;
 
