@@ -273,13 +273,23 @@ function velLabel(v) {
   return '위험';
 }
 
-function calcVelocity(ts) {
-  const n = ts.length;
+function calcVelocity(ts, dates) {
+  const valid = ts.map((v, i) => [i, v]).filter(([, v]) => v != null);
+  const n = valid.length;
   if (n < 2) return 0;
+  // 실제 날짜(개월 단위) 사용, 없으면 인덱스 사용
+  const parseMonths = d => {
+    const p = d.split('.');
+    return parseInt(p[0]) * 12 + parseInt(p[1]);
+  };
+  const xs = dates && dates.length >= ts.length
+    ? (() => { const t0 = parseMonths(dates[0]); return ts.map((_, i) => parseMonths(dates[i]) - t0); })()
+    : ts.map((_, i) => i);
+  const pts = valid.map(([i, v]) => [xs[i], v]);
   let sx=0, sy=0, sxy=0, sx2=0;
-  for (let i=0; i<n; i++) { sx+=i; sy+=ts[i]; sxy+=i*ts[i]; sx2+=i*i; }
-  const slope = (n*sxy - sx*sy) / (n*sx2 - sx*sx);
-  return slope * 12;
+  for (const [x, y] of pts) { sx+=x; sy+=y; sxy+=x*y; sx2+=x*x; }
+  const denom = n*sx2 - sx*sx;
+  return denom === 0 ? 0 : (n*sxy - sx*sy) / denom * 12;
 }
 
 function sliceByPeriod(cell, allDates) {
@@ -291,12 +301,21 @@ function sliceByPeriod(cell, allDates) {
 // ── 슬라이더 ───────────────────────────────────────────────
 let sliderDates = [];
 let siIdx = 0, eiIdx = 0;
-const MIN_SPAN = 6;
+let MIN_SPAN = 3;
+
+function calcMinSpan(dates) {
+  if (dates.length < 2) return 1;
+  const pm = d => { const p = d.split('.'); return parseInt(p[0]) * 12 + parseInt(p[1]); };
+  const totalMonths = pm(dates[dates.length - 1]) - pm(dates[0]);
+  const daysPerStep = totalMonths / (dates.length - 1);
+  return Math.max(1, Math.ceil(6 / Math.max(daysPerStep, 0.1)));
+}
 
 function buildSlider(dates) {
   sliderDates = dates;
   siIdx = 0;
   eiIdx = dates.length - 1;
+  MIN_SPAN = calcMinSpan(dates);
   updateSliderUI();
   removeSliderTicks();
   addSliderTicks(dates);
@@ -310,13 +329,18 @@ function removeSliderTicks() {
 function addSliderTicks(dates) {
   const wrap = document.getElementById('slider-wrap');
   const n = dates.length;
-  for (let i = 0; i < n; i += 12) {
-    const pct = i / (n - 1) * 100;
-    const tick = document.createElement('div');
-    tick.className = 'slider-tick';
-    tick.style.left = `calc(${pct}% + 8px)`;
-    tick.textContent = dates[i].substring(0, 4) + '년';
-    wrap.appendChild(tick);
+  let lastYear = null;
+  for (let i = 0; i < n; i++) {
+    const year = dates[i].substring(0, 4);
+    if (year !== lastYear) {
+      lastYear = year;
+      const pct = n > 1 ? i / (n - 1) * 100 : 0;
+      const tick = document.createElement('div');
+      tick.className = 'slider-tick';
+      tick.style.left = `calc(${pct}% + 8px)`;
+      tick.textContent = year + '년';
+      wrap.appendChild(tick);
+    }
   }
 }
 
@@ -509,9 +533,11 @@ function buildInterpolatedData(data) {
   // 격자 간격: 위/경도 고유값 정렬 후 중앙값 차이
   const lats = [...new Set(cells.map(c => c.lat))].sort((a, b) => a - b);
   const lons = [...new Set(cells.map(c => c.lon))].sort((a, b) => a - b);
+  if (lats.length < 3 || lons.length < 3) { data._interp = data; return data; }
   const med = arr => arr[Math.floor(arr.length / 2)];
   const dLat = med([...lats.slice(1, 21).map((v, i) => v - lats[i])].sort((a, b) => a - b));
   const dLon = med([...lons.slice(1, 21).map((v, i) => v - lons[i])].sort((a, b) => a - b));
+  if (!dLat || !dLon) { data._interp = data; return data; }
 
   const R = 5;
   const cmap = new Map();
@@ -557,8 +583,8 @@ function computeStats(data) {
   let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
   data.cells.forEach(cell => {
     if (airportOnly && !isInAirportZone(cell)) return;
-    const { ts } = sliceByPeriod(cell, data.dates);
-    const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+    const { ts, dates } = sliceByPeriod(cell, data.dates);
+    const v = currentPeriod ? parseFloat(calcVelocity(ts, dates).toFixed(1)) : cell.v;
     if (v > -5)       cntSafe++;
     else if (v > -10) cntWatch++;
     else if (v > -20) cntAlert++;
@@ -597,8 +623,8 @@ function renderVisible() {
     if (airportOnly && !isInAirportZone(cell)) return;
     if (!bounds.contains([cell.lat, cell.lon])) return;
 
-    const { ts } = sliceByPeriod(cell, data.dates);
-    const v   = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+    const { ts, dates } = sliceByPeriod(cell, data.dates);
+    const v   = currentPeriod ? parseFloat(calcVelocity(ts, dates).toFixed(1)) : cell.v;
     const col = velColor(v);
 
     let layer;
@@ -640,14 +666,26 @@ function drawChart(canvasId, dates, ts, vel) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   const existing = canvasId==='myChart' ? chartD : chartM;
   if (existing) existing.destroy();
+  // 추세선 계산
+  const slope = calcVelocity(ts, dates) / 12;
+  const t0idx = ts.findIndex(v => v != null);
+  const parseM = d => { const p = d.split('.'); return parseInt(p[0])*12+parseInt(p[1]); };
+  const m0 = t0idx >= 0 ? parseM(dates[t0idx]) : 0;
+  const trend = ts.map((_, i) => {
+    const x = parseM(dates[i]) - m0;
+    return t0idx >= 0 ? parseFloat(((ts[t0idx]??0) + slope * x).toFixed(1)) : null;
+  });
+  const col = velColor(vel);
   const c = new Chart(ctx, {
     type: 'line',
     data: {
       labels: dates,
-      datasets: [{
-        data: ts, borderColor: velColor(vel), backgroundColor: velColor(vel)+'33',
-        borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3
-      }]
+      datasets: [
+        { data: ts, borderColor: col, backgroundColor: col+'22',
+          borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3, order: 1 },
+        { data: trend, borderColor: col+'99', borderDash: [5,3],
+          pointRadius: 0, borderWidth: 1.5, fill: false, tension: 0, order: 2 }
+      ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
@@ -662,9 +700,22 @@ function drawChart(canvasId, dates, ts, vel) {
   if (canvasId==='myChart') chartD=c; else chartM=c;
 }
 
+function exportCsv() {
+  if (!selectedCell || !currentData) return;
+  const { dates, ts } = sliceByPeriod(selectedCell, currentData.dates);
+  const rows = [['날짜', '누적변위(mm)']];
+  dates.forEach((d, i) => rows.push([d, ts[i] != null ? ts[i] : '']));
+  const blob = new Blob(['﻿' + rows.map(r => r.join(',')).join('\n')],
+                        {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `침하_${selectedCell.lat.toFixed(4)}_${selectedCell.lon.toFixed(4)}.csv`;
+  a.click();
+}
+
 function showCell(cell, allDates) {
   const { dates, ts } = sliceByPeriod(cell, allDates);
-  const v = currentPeriod ? parseFloat(calcVelocity(ts).toFixed(1)) : cell.v;
+  const v = currentPeriod ? parseFloat(calcVelocity(ts, dates).toFixed(1)) : cell.v;
   const label = velLabel(v);
   const color = velColor(v);
   const si = currentPeriod ? currentPeriod.si : 0;
@@ -678,9 +729,10 @@ function showCell(cell, allDates) {
       <div class="info-row"><span>분석 기간</span><span>${pStr}</span></div>
       <div class="info-row"><span>침하속도</span><span style="color:${color}">${v} mm/yr</span></div>
       <div class="info-row"><span>등급</span><span style="color:${color}">${label}</span></div>
-      <div class="info-row"><span>누적변위</span><span>${(ts[ts.length-1]-ts[0]).toFixed(1)} mm</span></div>
+      <div class="info-row"><span>누적변위</span><span>${((ts[ts.length-1] ?? 0) - (ts[0] ?? 0)).toFixed(1)} mm</span></div>
       <div class="info-row"><span>위도</span><span>${cell.lat}</span></div>
       <div class="info-row"><span>경도</span><span>${cell.lon}</span></div>
+      <button onclick="exportCsv()" style="margin-top:8px;width:100%;padding:5px;background:#1a3050;color:#7a9bb5;border:1px solid #2a3a50;border-radius:4px;font-size:11px;cursor:pointer;" onmouseover="this.style.color='#4fc3f7'" onmouseout="this.style.color='#7a9bb5'">시계열 CSV 내보내기</button>
     `;
     document.getElementById('chart-wrap').style.display = 'block';
     drawChart('myChart', dates, ts, v);
@@ -723,7 +775,10 @@ function buildTabs() {
   AIRPORTS.forEach((ap, idx) => {
     const btn = document.createElement('button');
     btn.className = 'ap-btn' + (idx===2 ? ' active' : '');
+    const hasData = window.KAC_DATA && window.KAC_DATA[ap.code];
     btn.textContent = ap.name;
+    btn.style.opacity = hasData ? '1' : '0.55';
+    btn.title = hasData ? '실측 데이터 있음' : '데이터 준비 중';
     btn.onclick = () => switchAirport(ap, btn);
     bar.appendChild(btn);
   });
@@ -735,6 +790,12 @@ function switchAirport(ap, btn) {
 
   currentAirport = ap;
   selectedCell   = null;
+
+  // 공항 전환 시 패널 초기화
+  document.getElementById('panel-title').textContent = '지점 선택';
+  document.getElementById('panel-info').innerHTML = '<div class="placeholder">지도에서 격자를 클릭하면<br>해당 지점의 침하 시계열이 표시됩니다.</div>';
+  document.getElementById('chart-wrap').style.display = 'none';
+  if (chartD) { chartD.destroy(); chartD = null; }
 
   const apData = window.KAC_DATA && window.KAC_DATA[ap.code];
 

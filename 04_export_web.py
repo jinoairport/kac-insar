@@ -4,6 +4,7 @@
 실행:  python 04_export_web.py [공항번호]
 """
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -16,7 +17,6 @@ from airports import select_airport, AIRPORT_BUF, AIRPORTS
 
 def get_airport():
     """CLI 인수(공항 번호)가 있으면 바로 선택, 없으면 대화형 메뉴."""
-    import sys
     if len(sys.argv) > 1:
         try:
             sel = int(sys.argv[1])
@@ -31,7 +31,12 @@ airport = get_airport()
 print(f"\n[선택] {airport['name']} ({airport['code']})")
 
 code = airport["code"]
-MINTPY_DIR = Path("mintpy") / code
+try:
+    RES = int(sys.argv[2]) if len(sys.argv) > 2 else 80
+except ValueError:
+    RES = 80
+D_SUFFIX   = f"_INT{RES}" if RES != 80 else ""
+MINTPY_DIR = Path("mintpy") / (code + D_SUFFIX)
 OUT        = Path(f"data_{code}.js")
 region_airports = [
     {"code": code, "name": airport["name"],
@@ -69,7 +74,8 @@ epsg   = A("EPSG") if "EPSG" in at else None
 with h5py.File(msk_f) as f:
     mask = f["mask"][:].astype(bool)
 with h5py.File(ts_f) as f:
-    dates = [d.decode()[:6] for d in f["date"][:]]
+    raw_dates = [d.decode()[:8] for d in f["date"][:]]
+    dates = raw_dates
     ts    = f["timeseries"][:] * 1000.0
 
 rows, cols = vel.shape
@@ -97,7 +103,7 @@ for i, j in zip(*np.where(valid)):
 data = {
     "code":        code,
     "generated":   date.today().isoformat(),
-    "dates":       [f"{d[:4]}.{d[4:6]}" for d in dates],
+    "dates":       [f"{d[:4]}.{d[4:6]}.{d[6:8]}" for d in dates],
     "cell_m":      abs(dx),
     "airport_buf": AIRPORT_BUF,
     "airports":    region_airports,

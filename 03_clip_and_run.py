@@ -39,13 +39,14 @@ code = airport["code"]
 
 W, E = lon - BUF, lon + BUF
 S, N = lat - BUF, lat + BUF
-REGION = code
 
-# 해상도: CLI 3번째 인수로 지정 가능 (예: python 03_clip_and_run.py 9 160)
+# 해상도: CLI 3번째 인수로 지정 가능 (예: python 03_clip_and_run.py 3 20)
 try:
     RES = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_RES
 except ValueError:
     RES = DEFAULT_RES
+D_SUFFIX   = f"_INT{RES}" if RES != DEFAULT_RES else ""
+REGION     = code + D_SUFFIX      # e.g., PUS or PUS_INT20
 CLIP       = Path("clipped")   / REGION
 MINTPY_DIR = Path("mintpy")    / REGION
 
@@ -54,12 +55,16 @@ if (MINTPY_DIR / "velocity.h5").exists():
     print(f"[건너뜀] {MINTPY_DIR} 이미 분석 완료됨. 04_export_web.py를 실행하세요.")
     sys.exit(0)
 
-# 소스 데이터 찾기 (해당 공항 없으면 다른 공항 재활용)
-SRC = Path("hyp3_products") / code
+# 소스 데이터 찾기
+SRC = Path("hyp3_products") / (code + D_SUFFIX)
 if not SRC.exists() or not any(SRC.iterdir()):
+    if D_SUFFIX:
+        sys.exit(f"hyp3_products/{code}{D_SUFFIX} 폴더가 없습니다. "
+                 f"먼저 02_download.py {sys.argv[1] if len(sys.argv) > 1 else ''} {RES} 를 실행하세요.")
+    # INT80 전용: 다른 공항 데이터 재활용 (경상도권 공용 처리)
     candidates = sorted(
         d for d in Path("hyp3_products").iterdir()
-        if d.is_dir() and any(d.iterdir())
+        if d.is_dir() and any(d.iterdir()) and "_INT" not in d.name
     )
     if not candidates:
         sys.exit("hyp3_products 폴더에 데이터가 없습니다. 02번 스크립트를 먼저 실행하세요.")
