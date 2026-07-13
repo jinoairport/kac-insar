@@ -240,11 +240,11 @@
       공항 구역만
     </label>
     <button id="gps-btn" onclick="toggleGps()">📍 내 위치</button>
-    <button id="boundary-btn" onclick="toggleBoundaryMode()">✏️ 경계 설정</button>
+    <button id="boundary-btn" onclick="toggleBoundaryMode(event)">✏️ 경계 설정</button>
     <div id="boundary-tip"></div>
     <div id="boundary-actions">
-      <button id="ba-clear"  onclick="clearBoundary()">🗑 경계 삭제</button>
-      <button id="ba-export" onclick="exportBoundary()">💾 GeoJSON</button>
+      <button id="ba-clear"  onclick="clearBoundary(event)">🗑 경계 삭제</button>
+      <button id="ba-export" onclick="exportBoundary(event)">💾 GeoJSON</button>
     </div>
     <div id="legend">
       <div style="font-weight:700; margin-bottom:4px; color:#fff;">침하속도 (mm/yr)</div>
@@ -323,7 +323,8 @@ let boundaryPolyline = null;
 let boundaryPolygon  = null;
 let boundaryActive   = false; // 경계 필터 적용 중
 
-function toggleBoundaryMode() {
+function toggleBoundaryMode(e) {
+  if (e) { e.stopPropagation(); e.preventDefault(); }
   if (boundaryDrawing) {
     cancelBoundaryDraw();
   } else {
@@ -376,7 +377,8 @@ function finishBoundaryDraw() {
   if (currentData) renderGrid(currentData);
 }
 
-function clearBoundary() {
+function clearBoundary(e) {
+  if (e) { e.stopPropagation(); e.preventDefault(); }
   if (boundaryPolygon) { map.removeLayer(boundaryPolygon); boundaryPolygon = null; }
   boundaryPoints = [];
   boundaryActive = false;
@@ -434,7 +436,8 @@ function pointInPolygon(lat, lon, polygon) {
   return inside;
 }
 
-function exportBoundary() {
+function exportBoundary(e) {
+  if (e) { e.stopPropagation(); e.preventDefault(); }
   if (!boundaryPoints.length) return;
   const code = currentAirport?.code || 'AIRPORT';
   const coords = [...boundaryPoints, boundaryPoints[0]].map(([lat, lng]) => [
