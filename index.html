@@ -136,6 +136,33 @@
   #gps-btn.active { background: #0d2a3a; border-color: #4fc3f7; color: #4fc3f7; }
   #gps-btn.error  { border-color: #f44336; color: #f44336; }
 
+  #boundary-btn {
+    position: absolute; top: 154px; right: 10px; z-index: 1000;
+    background: #1a2636; color: #e0e0e0; border: 1px solid #2a3a50;
+    padding: 6px 10px; border-radius: 4px; font-size: 12px; cursor: pointer;
+    white-space: nowrap;
+  }
+  #boundary-btn:hover { background: #243446; border-color: #ff9800; color: #ff9800; }
+  #boundary-btn.drawing { background: #2a1a00; border-color: #ff9800; color: #ff9800; }
+  #boundary-btn.set     { background: #0d2a1a; border-color: #4caf50; color: #4caf50; }
+
+  #boundary-tip {
+    position: absolute; top: 190px; right: 10px; z-index: 1000;
+    background: rgba(26,38,54,0.95); border: 1px solid #ff9800; color: #ff9800;
+    padding: 5px 10px; border-radius: 4px; font-size: 11px;
+    display: none; white-space: nowrap; max-width: 200px; white-space: normal;
+  }
+  #boundary-actions {
+    position: absolute; top: 154px; left: 10px; z-index: 1000;
+    display: none; gap: 6px; flex-direction: column;
+  }
+  #boundary-actions button {
+    background: #1a2636; color: #e0e0e0; border: 1px solid #2a3a50;
+    padding: 5px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  }
+  #boundary-actions #ba-clear  { border-color: #f44336; color: #f44336; }
+  #boundary-actions #ba-export { border-color: #4caf50; color: #4caf50; }
+
   .gps-dot {
     width: 16px; height: 16px; border-radius: 50%;
     background: #2979ff; border: 3px solid #fff;
@@ -213,6 +240,12 @@
       공항 구역만
     </label>
     <button id="gps-btn" onclick="toggleGps()">📍 내 위치</button>
+    <button id="boundary-btn" onclick="toggleBoundaryMode()">✏️ 경계 설정</button>
+    <div id="boundary-tip"></div>
+    <div id="boundary-actions">
+      <button id="ba-clear"  onclick="clearBoundary()">🗑 경계 삭제</button>
+      <button id="ba-export" onclick="exportBoundary()">💾 GeoJSON</button>
+    </div>
     <div id="legend">
       <div style="font-weight:700; margin-bottom:4px; color:#fff;">침하속도 (mm/yr)</div>
       <div class="leg-row"><div class="leg-box" style="background:#4caf50"></div> 0 ~ -5 (안정)</div>
@@ -281,6 +314,144 @@ let selectedCell  = null;
 let gridLayer     = null;
 let chartD = null, chartM = null;
 let gpsWatchId = null, gpsMarker = null, gpsCircle = null, gpsActive = false;
+
+// ── 경계 설정 ─────────────────────────────────────────────
+let boundaryDrawing = false;
+let boundaryPoints  = [];
+let boundaryMarkers = [];
+let boundaryPolyline = null;
+let boundaryPolygon  = null;
+let boundaryActive   = false; // 경계 필터 적용 중
+
+function toggleBoundaryMode() {
+  if (boundaryDrawing) {
+    cancelBoundaryDraw();
+  } else {
+    startBoundaryDraw();
+  }
+}
+
+function startBoundaryDraw() {
+  boundaryDrawing = true;
+  boundaryPoints  = [];
+  boundaryMarkers.forEach(m => map.removeLayer(m));
+  boundaryMarkers = [];
+  if (boundaryPolyline) { map.removeLayer(boundaryPolyline); boundaryPolyline = null; }
+
+  const btn = document.getElementById('boundary-btn');
+  btn.className = 'drawing';
+  btn.textContent = '✏️ 그리는 중… (취소)';
+  const tip = document.getElementById('boundary-tip');
+  tip.style.display = 'block';
+  tip.textContent = '지도 클릭 → 꼭짓점 추가\n첫 번째 점(빨간 점)을 다시 클릭하면 완성';
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+function cancelBoundaryDraw() {
+  boundaryDrawing = false;
+  boundaryPoints  = [];
+  boundaryMarkers.forEach(m => map.removeLayer(m));
+  boundaryMarkers = [];
+  if (boundaryPolyline) { map.removeLayer(boundaryPolyline); boundaryPolyline = null; }
+  map.getContainer().style.cursor = '';
+  updateBoundaryUI();
+}
+
+function finishBoundaryDraw() {
+  boundaryDrawing = false;
+  boundaryMarkers.forEach(m => map.removeLayer(m));
+  boundaryMarkers = [];
+  if (boundaryPolyline) { map.removeLayer(boundaryPolyline); boundaryPolyline = null; }
+  map.getContainer().style.cursor = '';
+
+  if (boundaryPolygon) map.removeLayer(boundaryPolygon);
+  boundaryPolygon = L.polygon(boundaryPoints, {
+    color: '#ff9800', fillColor: '#ff9800', fillOpacity: 0.12,
+    weight: 2, dashArray: '6,3'
+  }).addTo(map);
+
+  boundaryActive = true;
+  saveBoundary();
+  updateBoundaryUI();
+  if (currentData) renderGrid(currentData);
+}
+
+function clearBoundary() {
+  if (boundaryPolygon) { map.removeLayer(boundaryPolygon); boundaryPolygon = null; }
+  boundaryPoints = [];
+  boundaryActive = false;
+  localStorage.removeItem('kac_boundary_' + (currentAirport?.code || ''));
+  updateBoundaryUI();
+  if (currentData) renderGrid(currentData);
+}
+
+function updateBoundaryUI() {
+  const btn = document.getElementById('boundary-btn');
+  const tip = document.getElementById('boundary-tip');
+  const actions = document.getElementById('boundary-actions');
+  if (boundaryActive) {
+    btn.className = 'set';
+    btn.textContent = '✏️ 경계 적용 중';
+    tip.style.display = 'none';
+    actions.style.display = 'flex';
+  } else {
+    btn.className = '';
+    btn.textContent = '✏️ 경계 설정';
+    tip.style.display = 'none';
+    actions.style.display = 'none';
+  }
+}
+
+function saveBoundary() {
+  if (!currentAirport) return;
+  localStorage.setItem('kac_boundary_' + currentAirport.code, JSON.stringify(boundaryPoints));
+}
+
+function loadBoundary(code) {
+  const raw = localStorage.getItem('kac_boundary_' + code);
+  if (!raw) return;
+  try {
+    boundaryPoints = JSON.parse(raw);
+    if (boundaryPoints.length < 3) return;
+    if (boundaryPolygon) map.removeLayer(boundaryPolygon);
+    boundaryPolygon = L.polygon(boundaryPoints, {
+      color: '#ff9800', fillColor: '#ff9800', fillOpacity: 0.12,
+      weight: 2, dashArray: '6,3'
+    }).addTo(map);
+    boundaryActive = true;
+    updateBoundaryUI();
+  } catch(e) { boundaryPoints = []; }
+}
+
+function pointInPolygon(lat, lon, polygon) {
+  let inside = false;
+  const x = lon, y = lat;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][1], yi = polygon[i][0];
+    const xj = polygon[j][1], yj = polygon[j][0];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+function exportBoundary() {
+  if (!boundaryPoints.length) return;
+  const code = currentAirport?.code || 'AIRPORT';
+  const coords = [...boundaryPoints, boundaryPoints[0]].map(([lat, lng]) => [
+    parseFloat(lng.toFixed(6)), parseFloat(lat.toFixed(6))
+  ]);
+  const gj = JSON.stringify({
+    type: 'FeatureCollection',
+    features: [{ type: 'Feature',
+      properties: { airport: code },
+      geometry: { type: 'Polygon', coordinates: [coords] }
+    }]
+  }, null, 2);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([gj], {type:'application/json'}));
+  a.download = `${code.toLowerCase()}_boundary.geojson`;
+  a.click();
+}
 
 function toggleGps() {
   if (!navigator.geolocation) {
@@ -670,6 +841,7 @@ function computeStats(data) {
   let cntSafe=0, cntWatch=0, cntAlert=0, cntDanger=0;
   data.cells.forEach(cell => {
     if (airportOnly && !isInAirportZone(cell)) return;
+    if (boundaryActive && boundaryPoints.length >= 3 && !pointInPolygon(cell.lat, cell.lon, boundaryPoints)) return;
     const { ts, dates } = sliceByPeriod(cell, data.dates);
     const v = currentPeriod ? parseFloat(calcVelocity(ts, dates).toFixed(1)) : cell.v;
     if (v > -5)       cntSafe++;
@@ -708,6 +880,7 @@ function renderVisible() {
   data.cells.forEach((cell, idx) => {
     if (idx % step !== 0) return;
     if (airportOnly && !isInAirportZone(cell)) return;
+    if (boundaryActive && boundaryPoints.length >= 3 && !pointInPolygon(cell.lat, cell.lon, boundaryPoints)) return;
     if (!bounds.contains([cell.lat, cell.lon])) return;
 
     const { ts, dates } = sliceByPeriod(cell, data.dates);
@@ -747,6 +920,37 @@ function renderGrid(data) {
 
 // 줌·패닝 시 화면 내 격자만 재렌더
 map.on('zoomend moveend', renderVisible);
+
+// 경계 그리기 클릭
+map.on('click', function(e) {
+  if (!boundaryDrawing) return;
+  const { lat, lng } = e.latlng;
+
+  // 3점 이상이고 첫 점 근처 클릭 시 완성
+  if (boundaryPoints.length >= 3) {
+    const first = boundaryPoints[0];
+    const dist = map.distance([lat, lng], [first[0], first[1]]);
+    if (dist < 25) { finishBoundaryDraw(); return; }
+  }
+
+  boundaryPoints.push([lat, lng]);
+
+  const isFirst = boundaryPoints.length === 1;
+  const dot = L.circleMarker([lat, lng], {
+    radius: isFirst ? 8 : 4,
+    color: isFirst ? '#ff5722' : '#ff9800',
+    fillColor: isFirst ? '#ff5722' : '#ff9800',
+    fillOpacity: 1, weight: 2
+  }).addTo(map);
+  if (isFirst) dot.bindTooltip('여기 다시 클릭 → 완성', {permanent: true, direction: 'right'});
+  boundaryMarkers.push(dot);
+
+  if (boundaryPolyline) map.removeLayer(boundaryPolyline);
+  boundaryPolyline = L.polyline(boundaryPoints, { color: '#ff9800', weight: 2, dashArray: '6,3' }).addTo(map);
+
+  document.getElementById('boundary-tip').textContent =
+    `꼭짓점 ${boundaryPoints.length}개 — 빨간 점 클릭으로 완성`;
+});
 
 // ── 그래프 ─────────────────────────────────────────────────
 function drawChart(canvasId, dates, ts, vel) {
@@ -883,6 +1087,12 @@ function switchAirport(ap, btn) {
   document.getElementById('panel-info').innerHTML = '<div class="placeholder">지도에서 격자를 클릭하면<br>해당 지점의 침하 시계열이 표시됩니다.</div>';
   document.getElementById('chart-wrap').style.display = 'none';
   if (chartD) { chartD.destroy(); chartD = null; }
+
+  // 경계 초기화 후 해당 공항 경계 불러오기
+  if (boundaryPolygon) { map.removeLayer(boundaryPolygon); boundaryPolygon = null; }
+  boundaryPoints = []; boundaryActive = false; boundaryDrawing = false;
+  updateBoundaryUI();
+  loadBoundary(ap.code);
 
   const apData = window.KAC_DATA && window.KAC_DATA[ap.code];
 
