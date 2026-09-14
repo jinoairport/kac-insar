@@ -1102,15 +1102,26 @@ function updateLegendThresholds() {
   document.getElementById('leg-t3').textContent = `${f(t3)} 이하`;
 }
 
-// ── 표시 범위 슬라이더 (TC 기반 5단계) ───────────────────
-const TC_LEVELS = [
-  { val: 5,  label: '전체 표시',      desc: '강·하천·논밭 포함' },
-  { val: 15, label: '강·하천 제외',   desc: '논밭 포함' },
-  { val: 25, label: '논밭도 제외',    desc: '포장면 위주' },
-  { val: 40, label: '포장면·도로',    desc: '건물·아스팔트 위주' },
-  { val: 55, label: '건물·구조물만',  desc: '가장 신뢰도 높은 지점' },
+// ── 표시 범위 슬라이더 (데이터 백분위수 기반 5단계) ──────
+// TC 단계값은 loadData() 시점에 데이터의 실제 분포로 설정됨
+let TC_LEVELS = [
+  { val: 0,  label: '전체 표시' },
+  { val: 0,  label: '상위 80% 표시' },
+  { val: 0,  label: '상위 60% 표시' },
+  { val: 0,  label: '상위 40% 표시' },
+  { val: 0,  label: '상위 20% 표시' },
 ];
-let MIN_TC_WEB = 5;
+let MIN_TC_WEB = 0;
+function initTcLevels(data) {
+  const p = data.tc_pct || { p20:5, p40:10, p60:15, p80:20 };
+  TC_LEVELS = [
+    { val: 0,     label: '전체 표시' },
+    { val: p.p20, label: '상위 80% 표시' },
+    { val: p.p40, label: '상위 60% 표시' },
+    { val: p.p60, label: '상위 40% 표시' },
+    { val: p.p80, label: '상위 20% 표시' },
+  ];
+}
 function onTcChange(val) {
   const lv = TC_LEVELS[parseInt(val) - 1];
   MIN_TC_WEB = lv.val;
@@ -1205,6 +1216,10 @@ function loadData(data) {
   currentData   = data;
   currentPeriod = null;
   selectedCell  = null;
+  MIN_TC_WEB    = 0;
+  document.getElementById('tc-slider').value = 1;
+  document.getElementById('tc-label').textContent = '전체 표시';
+  initTcLevels(data);
   buildSlider(data.dates);
   renderGrid(data);
 }
