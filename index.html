@@ -611,9 +611,15 @@ function calcMinSpan(dates) {
 
 function buildSlider(dates) {
   sliderDates = dates;
-  siIdx = 0;
   eiIdx = dates.length - 1;
   MIN_SPAN = calcMinSpan(dates);
+
+  // 초기 화면: 최근 5년 구간으로 설정
+  const latestYear = parseInt(dates[eiIdx].substring(0, 4));
+  const fiveYearsAgo = String(latestYear - 5);
+  const startIdx = dates.findIndex(d => d.substring(0, 4) >= fiveYearsAgo);
+  siIdx = startIdx >= 0 ? startIdx : 0;
+
   updateSliderUI();
   removeSliderTicks();
   addSliderTicks(dates);
@@ -1221,6 +1227,9 @@ function loadData(data) {
   document.getElementById('tc-label').textContent = '전체 표시';
   initTcLevels(data);
   buildSlider(data.dates);
+  // 초기 5년 구간 적용
+  const isAll = (siIdx === 0 && eiIdx === sliderDates.length - 1);
+  currentPeriod = isAll ? null : { si: siIdx, ei: eiIdx };
   renderGrid(data);
 }
 
