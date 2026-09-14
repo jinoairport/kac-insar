@@ -254,26 +254,26 @@
       <div class="leg-row"><div class="leg-box" style="background:#f44336"></div> <span id="leg-t3">-20 이하</span> (위험)</div>
       <div style="margin-top:8px; padding-top:7px; border-top:1px solid #2a3a50;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-          <span style="font-size:10px; color:#7a9bb5;">🎚 감도</span>
-          <span id="sens-label" style="font-size:10px; color:#4fc3f7; font-weight:700;">기본 (×1.0)</span>
+          <span style="font-size:10px; color:#7a9bb5;">🎚 색상 구분 기준</span>
+          <span id="sens-label" style="font-size:10px; color:#4fc3f7; font-weight:700;">기본</span>
         </div>
-        <input type="range" id="sens-slider" min="1" max="10" step="1" value="2"
-          style="width:100%; accent-color:#4fc3f7; cursor:pointer;"
+        <input type="range" id="sens-slider" min="1" max="10" step="1" value="7"
+          style="width:100%; accent-color:#4fc3f7; cursor:grab;"
           oninput="onSensChange(this.value)">
         <div style="display:flex; justify-content:space-between; font-size:9px; color:#4a6070; margin-top:1px;">
-          <span>민감</span><span>둔감</span>
+          <span>둔감 (작은침하 무시)</span><span>민감 (작은침하 표시)</span>
         </div>
       </div>
       <div style="margin-top:7px; padding-top:7px; border-top:1px solid #2a3a50;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-          <span style="font-size:10px; color:#7a9bb5;">🔍 신뢰도 필터 (TC)</span>
-          <span id="tc-label" style="font-size:10px; color:#4fc3f7; font-weight:700;">TC ≥ 0.05</span>
+          <span style="font-size:10px; color:#7a9bb5;">🔍 표시 범위</span>
+          <span id="tc-label" style="font-size:10px; color:#4fc3f7; font-weight:700;">전체 표시</span>
         </div>
-        <input type="range" id="tc-slider" min="5" max="80" step="5" value="5"
-          style="width:100%; accent-color:#4fc3f7; cursor:pointer;"
+        <input type="range" id="tc-slider" min="1" max="5" step="1" value="1"
+          style="width:100%; accent-color:#4fc3f7; cursor:grab;"
           oninput="onTcChange(this.value)">
         <div style="display:flex; justify-content:space-between; font-size:9px; color:#4a6070; margin-top:1px;">
-          <span>전체표시</span><span>고신뢰만</span>
+          <span>강·하천 포함</span><span>도로·건물만</span>
         </div>
       </div>
       <div style="margin-top:8px; padding-top:7px; border-top:1px solid #2a3a50; color:#8a9bb5; font-size:10px; max-width:200px; line-height:1.6;">
@@ -963,6 +963,9 @@ function renderGrid(data) {
 // 줌·패닝 시 화면 내 격자만 재렌더
 map.on('zoomend moveend', renderVisible);
 
+// 범례 슬라이더 드래그 이벤트가 지도로 전파되지 않도록 차단
+initSliderDragFix();
+
 // 경계 그리기 클릭
 map.on('click', function(e) {
   if (!boundaryDrawing) return;
@@ -1079,13 +1082,14 @@ function showCell(cell, allDates) {
   }
 }
 
-// ── 감도 슬라이더 ─────────────────────────────────────────
-const SENS_STEPS = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 10.0];
+// ── 색상 구분 기준 슬라이더 (좌=둔감, 우=민감) ────────────
+// 오른쪽으로 갈수록 민감: 작은 침하도 빨갛게 표시
+const SENS_STEPS = [10.0, 6.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25];
+const SENS_LABELS = ['매우 둔감','둔감','둔감','다소 둔감','다소 둔감','기본','기본','다소 민감','민감','매우 민감'];
 function onSensChange(val) {
   const idx = parseInt(val) - 1;
   SENS_SCALE = SENS_STEPS[idx];
-  const label = SENS_SCALE < 1 ? `민감 (×${SENS_SCALE})` : SENS_SCALE === 1 ? '기본 (×1.0)' : `둔감 (×${SENS_SCALE})`;
-  document.getElementById('sens-label').textContent = label;
+  document.getElementById('sens-label').textContent = SENS_LABELS[idx];
   updateLegendThresholds();
   renderVisible();
 }
@@ -1098,12 +1102,31 @@ function updateLegendThresholds() {
   document.getElementById('leg-t3').textContent = `${f(t3)} 이하`;
 }
 
-// ── TC 신뢰도 슬라이더 ────────────────────────────────────
-let MIN_TC_WEB = 5;  // 0~100 정수 (tc 필드값 기준)
+// ── 표시 범위 슬라이더 (TC 기반 5단계) ───────────────────
+const TC_LEVELS = [
+  { val: 5,  label: '전체 표시',      desc: '강·하천·논밭 포함' },
+  { val: 15, label: '강·하천 제외',   desc: '논밭 포함' },
+  { val: 25, label: '논밭도 제외',    desc: '포장면 위주' },
+  { val: 40, label: '포장면·도로',    desc: '건물·아스팔트 위주' },
+  { val: 55, label: '건물·구조물만',  desc: '가장 신뢰도 높은 지점' },
+];
+let MIN_TC_WEB = 5;
 function onTcChange(val) {
-  MIN_TC_WEB = parseInt(val);
-  document.getElementById('tc-label').textContent = `TC ≥ ${(MIN_TC_WEB/100).toFixed(2)}`;
+  const lv = TC_LEVELS[parseInt(val) - 1];
+  MIN_TC_WEB = lv.val;
+  document.getElementById('tc-label').textContent = lv.label;
   renderVisible();
+}
+
+// ── 슬라이더 드래그 시 지도 이동 방지 ────────────────────
+function initSliderDragFix() {
+  ['sens-slider', 'tc-slider'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    ['mousedown','touchstart','pointerdown'].forEach(ev =>
+      el.addEventListener(ev, e => e.stopPropagation(), {passive: false})
+    );
+  });
 }
 
 // ── 더미 데이터 ────────────────────────────────────────────
