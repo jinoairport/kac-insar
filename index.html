@@ -264,6 +264,18 @@
           <span>민감</span><span>둔감</span>
         </div>
       </div>
+      <div style="margin-top:7px; padding-top:7px; border-top:1px solid #2a3a50;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+          <span style="font-size:10px; color:#7a9bb5;">🔍 신뢰도 필터 (TC)</span>
+          <span id="tc-label" style="font-size:10px; color:#4fc3f7; font-weight:700;">TC ≥ 0.05</span>
+        </div>
+        <input type="range" id="tc-slider" min="5" max="80" step="5" value="5"
+          style="width:100%; accent-color:#4fc3f7; cursor:pointer;"
+          oninput="onTcChange(this.value)">
+        <div style="display:flex; justify-content:space-between; font-size:9px; color:#4a6070; margin-top:1px;">
+          <span>전체표시</span><span>고신뢰만</span>
+        </div>
+      </div>
       <div style="margin-top:8px; padding-top:7px; border-top:1px solid #2a3a50; color:#8a9bb5; font-size:10px; max-width:200px; line-height:1.6;">
         <div class="leg-row" style="margin-bottom:4px; align-items:flex-start;">
           <div class="leg-box" style="background:#1a2636 repeating-linear-gradient(45deg,rgba(255,255,255,0.35),rgba(255,255,255,0.35) 2px,transparent 2px,transparent 6px); border:1px solid #6a8a9a; flex-shrink:0; margin-top:2px;"></div>
@@ -911,6 +923,7 @@ function renderVisible() {
     if (airportOnly && !isInAirportZone(cell)) return;
     if (boundaryActive && boundaryPoints.length >= 3 && !pointInPolygon(cell.lat, cell.lon, boundaryPoints)) return;
     if (!bounds.contains([cell.lat, cell.lon])) return;
+    if ((cell.tc ?? 100) < MIN_TC_WEB) return;  // TC 신뢰도 필터
 
     const { ts, dates } = sliceByPeriod(cell, data.dates);
     const v   = currentPeriod ? parseFloat(calcVelocity(ts, dates).toFixed(1)) : cell.v;
@@ -1083,6 +1096,14 @@ function updateLegendThresholds() {
   document.getElementById('leg-t1').textContent = `${f(t1)} ~ ${f(t2)}`;
   document.getElementById('leg-t2').textContent = `${f(t2)} ~ ${f(t3)}`;
   document.getElementById('leg-t3').textContent = `${f(t3)} 이하`;
+}
+
+// ── TC 신뢰도 슬라이더 ────────────────────────────────────
+let MIN_TC_WEB = 5;  // 0~100 정수 (tc 필드값 기준)
+function onTcChange(val) {
+  MIN_TC_WEB = parseInt(val);
+  document.getElementById('tc-label').textContent = `TC ≥ ${(MIN_TC_WEB/100).toFixed(2)}`;
+  renderVisible();
 }
 
 // ── 더미 데이터 ────────────────────────────────────────────
